@@ -49,11 +49,14 @@
   function trendFor(frame) {
     const bars = normalizeBars(state.charts[frame]?.bars);
     if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
+    if (state.charts[frame]?.stale || Date.now() - bars.at(-1).time * 1000 > 7 * 86400000) {
+      return { direction: "wait", label: "กราฟเก่า", detail: "รอข้อมูลใหม่จาก PCC", stale: true };
+    }
     const closes = bars.map((bar) => bar.close);
     const fast = ema(closes, 9).at(-1), slow = ema(closes, 21).at(-1), last = closes.at(-1);
-    if (last > fast && fast > slow) return { direction: "up", label: "ขึ้น", detail: `ราคา > EMA9 > EMA21` };
-    if (last < fast && fast < slow) return { direction: "down", label: "ลง", detail: `ราคา < EMA9 < EMA21` };
-    return { direction: "wait", label: "รอ", detail: "EMA ยังไม่เรียงตัว" };
+    if (last > fast && fast > slow) return { direction: "up", label: "ขึ้น", detail: `ราคา > EMA9 > EMA21`, usable: true };
+    if (last < fast && fast < slow) return { direction: "down", label: "ลง", detail: `ราคา < EMA9 < EMA21`, usable: true };
+    return { direction: "wait", label: "รอ", detail: "EMA ยังไม่เรียงตัว", usable: true };
   }
 
   function renderWatchlist() {
@@ -90,11 +93,13 @@
     const up = trends.filter((trend) => trend.direction === "up").length;
     const down = trends.filter((trend) => trend.direction === "down").length;
     const available = up + down;
-    const loaded = frames.filter(([frame]) => normalizeBars(state.charts[frame]?.bars).length >= 25).length;
+    const loaded = trends.filter((trend) => trend.usable).length;
+    const stale = trends.filter((trend) => trend.stale).length;
     const verdict = $("#signal-verdict");
     let message = "รอข้อมูลกราฟ", detail = "ยังประเมินแนวโน้มไม่ได้", tone = "wait";
     if (available === 3 && up === 3) { message = "แนวโน้มขึ้นตรงกัน 3/3"; detail = "ตรวจสัญญา CALL และเงื่อนไขเข้าเพิ่มเติม"; tone = "up"; }
     else if (available === 3 && down === 3) { message = "แนวโน้มลงตรงกัน 3/3"; detail = "ตรวจสัญญา PUT และเงื่อนไขเข้าเพิ่มเติม"; tone = "down"; }
+    else if (stale > 0) { message = "รอกราฟใหม่จาก PCC"; detail = `${stale} ช่วงเวลาเป็นข้อมูลเก่า · ไม่ใช้ยืนยันสัญญาณ`; }
     else if (loaded > 0) { message = "ทิศทางยังไม่ตรงกัน"; detail = `${up} ขึ้น · ${down} ลง · ${3 - available} รอ`; }
     verdict.className = `signal-verdict ${tone}`;
     verdict.innerHTML = `<span>${message}</span><small>${detail}</small>`;
