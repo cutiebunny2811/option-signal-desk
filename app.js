@@ -62,9 +62,14 @@
     return [...seen.values()].sort((a, b) => a.time - b.time);
   }
 
+  function closedBars(input, minutes) {
+    const cutoff = Date.now() / 1000 - 3;
+    return normalizeBars(input).filter((bar) => bar.time + minutes * 60 <= cutoff);
+  }
+
   function aggregateBars(input, minutes) {
     const groups = new Map();
-    for (const bar of normalizeBars(input)) {
+    for (const bar of closedBars(input, 1)) {
       const bucket = Math.floor(bar.time / (minutes * 60)) * minutes * 60;
       if (!groups.has(bucket)) groups.set(bucket, []);
       groups.get(bucket).push(bar);
@@ -79,7 +84,7 @@
   function barsFor(frame) {
     if (frame === "M5") return aggregateBars(state.charts.M1?.bars, 5);
     if (frame === "M15") return aggregateBars(state.charts.M1?.bars, 15);
-    return normalizeBars(state.charts[frame]?.bars);
+    return closedBars(state.charts[frame]?.bars, frame === "M60" ? 60 : 1);
   }
 
   function sourceFor(frame) { return state.charts[["M5", "M15"].includes(frame) ? "M1" : frame]; }
@@ -105,7 +110,9 @@
     if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
     if (!marketOpenNow()) return { direction: "wait", label: "ตลาดปิด", detail: "ไม่คอนเฟิร์มนอกเวลาตลาด", closed: true };
     const duration = { M1: 1, M5: 5, M15: 15, M60: 60 }[frame] || 60;
-    const maxLag = { M1: 4, M5: 7, M15: 10, M60: 45 }[frame] || 45;
+    // A completed higher-timeframe candle stays valid until its successor closes.
+    // Give each frame one full candle plus a small provider/cache arrival margin.
+    const maxLag = { M1: 4, M5: 8, M15: 18, M60: 65 }[frame] || 65;
     if (sourceFor(frame)?.stale || Date.now() - (bars.at(-1).time + duration * 60) * 1000 > maxLag * 60_000) {
       return { direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
     }
