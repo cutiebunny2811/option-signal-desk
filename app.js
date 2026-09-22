@@ -368,9 +368,11 @@
     button.disabled = true;
     $("#auth-message").textContent = "กำลังเข้าสู่ระบบ…";
     try {
-      const { data, error } = await state.db.auth.signInWithPassword({ email: form.email.value.trim(), password: form.password.value });
+      const emailField = form.elements.namedItem("email");
+      const passwordField = form.elements.namedItem("password");
+      const { data, error } = await state.db.auth.signInWithPassword({ email: emailField.value.trim(), password: passwordField.value });
       if (error) throw error;
-      form.password.value = "";
+      passwordField.value = "";
       await showDesk(data.user);
     } catch (error) {
       $("#auth-message").textContent = error.message || "เข้าสู่ระบบไม่สำเร็จ";
