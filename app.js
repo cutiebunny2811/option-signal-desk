@@ -16,9 +16,25 @@
   };
   const state = {
     db: null, user: null, watchlist: [], pulse: [], search: "", symbol: "", instrumentId: null,
-    call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M60",
-    chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: ""
+    call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M1",
+    chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
+    lastOptionAttemptAt: 0, lastChartAttemptAt: {}, lastWatchlistReadAt: 0,
+    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0
   };
+
+  const OPTION_POLL_MS = 3 * 60_000;
+  const MINUTE_POLL_MS = 2 * 60_000;
+  const HOUR_POLL_MS = 10 * 60_000;
+  const IDLE_PAUSE_MS = 20 * 60_000;
+
+  function marketOpenNow() {
+    if (demo) return true;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+    }).formatToParts(new Date()).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    return !["Sat", "Sun"].includes(parts.weekday) && minutes >= 570 && minutes < 960;
+  }
 
   function setStatus(message = "", isError = false) {
     const line = $("#status-line");
@@ -46,17 +62,60 @@
     return [...seen.values()].sort((a, b) => a.time - b.time);
   }
 
+  function aggregateBars(input, minutes) {
+    const groups = new Map();
+    for (const bar of normalizeBars(input)) {
+      const bucket = Math.floor(bar.time / (minutes * 60)) * minutes * 60;
+      if (!groups.has(bucket)) groups.set(bucket, []);
+      groups.get(bucket).push(bar);
+    }
+    return [...groups].filter(([, rows]) => rows.length === minutes).map(([time, rows]) => ({
+      time, open: rows[0].open, high: Math.max(...rows.map((row) => row.high)),
+      low: Math.min(...rows.map((row) => row.low)), close: rows.at(-1).close,
+      volume: rows.reduce((sum, row) => sum + row.volume, 0)
+    }));
+  }
+
+  function barsFor(frame) {
+    if (frame === "M5") return aggregateBars(state.charts.M1?.bars, 5);
+    if (frame === "M15") return aggregateBars(state.charts.M1?.bars, 15);
+    return normalizeBars(state.charts[frame]?.bars);
+  }
+
+  function sourceFor(frame) { return state.charts[["M5", "M15"].includes(frame) ? "M1" : frame]; }
+
+  function rsi(values, period = 14) {
+    if (values.length <= period) return null;
+    let gain = 0, loss = 0;
+    for (let index = 1; index <= period; index += 1) {
+      const change = values[index] - values[index - 1];
+      gain += Math.max(change, 0); loss += Math.max(-change, 0);
+    }
+    gain /= period; loss /= period;
+    for (let index = period + 1; index < values.length; index += 1) {
+      const change = values[index] - values[index - 1];
+      gain = (gain * (period - 1) + Math.max(change, 0)) / period;
+      loss = (loss * (period - 1) + Math.max(-change, 0)) / period;
+    }
+    return loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+  }
+
   function trendFor(frame) {
-    const bars = normalizeBars(state.charts[frame]?.bars);
+    const bars = barsFor(frame);
     if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
-    if (state.charts[frame]?.stale || Date.now() - bars.at(-1).time * 1000 > 7 * 86400000) {
-      return { direction: "wait", label: "กราฟเก่า", detail: "รอข้อมูลใหม่จาก PCC", stale: true };
+    if (!marketOpenNow()) return { direction: "wait", label: "ตลาดปิด", detail: "ไม่คอนเฟิร์มนอกเวลาตลาด", closed: true };
+    const duration = { M1: 1, M5: 5, M15: 15, M60: 60 }[frame] || 60;
+    const maxLag = { M1: 4, M5: 7, M15: 10, M60: 45 }[frame] || 45;
+    if (sourceFor(frame)?.stale || Date.now() - (bars.at(-1).time + duration * 60) * 1000 > maxLag * 60_000) {
+      return { direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
     }
     const closes = bars.map((bar) => bar.close);
     const fast = ema(closes, 9).at(-1), slow = ema(closes, 21).at(-1), last = closes.at(-1);
-    if (last > fast && fast > slow) return { direction: "up", label: "ขึ้น", detail: `ราคา > EMA9 > EMA21`, usable: true };
-    if (last < fast && fast < slow) return { direction: "down", label: "ลง", detail: `ราคา < EMA9 < EMA21`, usable: true };
-    return { direction: "wait", label: "รอ", detail: "EMA ยังไม่เรียงตัว", usable: true };
+    const strength = rsi(closes);
+    const rsiLabel = strength === null ? "RSI —" : `RSI ${Math.round(strength)}`;
+    if (strength !== null && last > fast && fast > slow && strength >= 50) return { direction: "up", label: "ขึ้น", detail: `${rsiLabel} · EMA ขึ้น`, usable: true };
+    if (strength !== null && last < fast && fast < slow && strength < 50) return { direction: "down", label: "ลง", detail: `${rsiLabel} · EMA ลง`, usable: true };
+    return { direction: "wait", label: "รอ", detail: `${rsiLabel} · ยังไม่ตรง`, usable: true };
   }
 
   function renderWatchlist() {
@@ -87,22 +146,40 @@
   }
 
   function renderSignals() {
-    const frames = [["M60", "1H"], ["M240", "4H"], ["D", "1D"]];
+    const frames = [["M1", "1m"], ["M5", "5m"], ["M15", "15m"], ["M60", "1h"]];
     const trends = frames.map(([frame, label]) => ({ ...trendFor(frame), frame, frameLabel: label }));
     $("#signal-grid").innerHTML = trends.map((trend) => `<div class="signal-card"><small>${trend.frameLabel}</small><strong class="${trend.direction}">${trend.label}</strong><span>${esc(trend.detail)}</span></div>`).join("");
     const up = trends.filter((trend) => trend.direction === "up").length;
     const down = trends.filter((trend) => trend.direction === "down").length;
-    const available = up + down;
     const loaded = trends.filter((trend) => trend.usable).length;
     const stale = trends.filter((trend) => trend.stale).length;
     const verdict = $("#signal-verdict");
     let message = "รอข้อมูลกราฟ", detail = "ยังประเมินแนวโน้มไม่ได้", tone = "wait";
-    if (available === 3 && up === 3) { message = "แนวโน้มขึ้นตรงกัน 3/3"; detail = "ตรวจสัญญา CALL และเงื่อนไขเข้าเพิ่มเติม"; tone = "up"; }
-    else if (available === 3 && down === 3) { message = "แนวโน้มลงตรงกัน 3/3"; detail = "ตรวจสัญญา PUT และเงื่อนไขเข้าเพิ่มเติม"; tone = "down"; }
-    else if (stale > 0) { message = "รอกราฟใหม่จาก PCC"; detail = `${stale} ช่วงเวลาเป็นข้อมูลเก่า · ไม่ใช้ยืนยันสัญญาณ`; }
-    else if (loaded > 0) { message = "ทิศทางยังไม่ตรงกัน"; detail = `${up} ขึ้น · ${down} ลง · ${3 - available} รอ`; }
+    if (!marketOpenNow()) { message = "ตลาดสหรัฐฯ ปิด"; detail = "สัญญาณ 4 ช่วงเวลาจะคอนเฟิร์มเฉพาะช่วงตลาดเปิด"; }
+    else if (stale > 0) { message = "รอแท่งราคาใหม่"; detail = `${stale} ช่วงเวลาเก่า · ไม่ใช้ยืนยันสัญญาณ`; }
+    else if (loaded === 4 && up === 4) { message = "แนวโน้มขึ้นตรงกัน 4/4"; detail = "เฝ้าดู CALL · ยังต้องเช็กจุดเข้าและสัญญา"; tone = "up"; }
+    else if (loaded === 4 && down === 4) { message = "แนวโน้มลงตรงกัน 4/4"; detail = "เฝ้าดู PUT · ยังต้องเช็กจุดเข้าและสัญญา"; tone = "down"; }
+    else if (loaded > 0) { message = "ยังไม่คอนเฟิร์ม"; detail = `${up} ขึ้น · ${down} ลง · ${4 - up - down} รอ`; }
     verdict.className = `signal-verdict ${tone}`;
     verdict.innerHTML = `<span>${message}</span><small>${detail}</small>`;
+    const quoteFresh = (side) => {
+      const quoteTimes = contracts(side).map((item) => new Date(item.quote_time).getTime()).filter(Number.isFinite);
+      return quoteTimes.length > 0 && Date.now() - Math.max(...quoteTimes) < 5 * 60_000;
+    };
+    const callReady = tone === "up" && quoteFresh("call");
+    const putReady = tone === "down" && quoteFresh("put");
+    $("#option-signal").innerHTML = `<div class="option-lane ${callReady ? "active call" : ""}"><span>CALL / ฝั่งขึ้น</span><strong>${callReady ? "เฝ้าดู" : "WAIT"}</strong><small>${callReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div><div class="option-lane ${putReady ? "active put" : ""}"><span>PUT / ฝั่งลง</span><strong>${putReady ? "เฝ้าดู" : "WAIT"}</strong><small>${putReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+  }
+
+  function renderDataStatus() {
+    const open = marketOpenNow();
+    const idle = Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS;
+    const paused = Date.now() < state.quotaPauseUntil;
+    $("#refresh-policy").textContent = demo ? "ข้อมูลตัวอย่างในเครื่อง" : paused ? "พักการดึงข้อมูลหลังพบข้อจำกัด API" : !open ? "ตลาดสหรัฐฯ ปิด · หยุดรีเฟรชอัตโนมัติ" : document.hidden || idle ? "พักอัตโนมัติ · กลับมาที่แท็บเพื่ออัปเดต" : "ติดตามอัตโนมัติ · กราฟ 2 นาที / Option 3 นาที";
+    const quoteTimes = [...contracts("call"), ...contracts("put")].map((item) => new Date(item.quote_time).getTime()).filter(Number.isFinite);
+    $("#option-freshness").textContent = quoteTimes.length ? `Option quote ${bkkTime(new Date(Math.max(...quoteTimes)))}` : "Option quote —";
+    const minute = state.charts.M1;
+    $("#minute-freshness").textContent = minute?.fetched_at ? `กราฟ 1m ${minute.stale ? "แคชเก่า" : "อ่านเมื่อ"} ${bkkTime(minute.fetched_at)}` : "กราฟ 1m —";
   }
 
   function clearChart() {
@@ -116,24 +193,24 @@
     const container = $("#price-chart");
     clearChart();
     container.replaceChildren();
-    const data = state.charts[state.chartFrame];
-    const bars = normalizeBars(data?.bars);
+    const data = sourceFor(state.chartFrame);
+    const bars = barsFor(state.chartFrame);
     $("#chart-freshness").textContent = data?.fetched_at ? `${data.stale ? "แคชเก่า" : data.cached ? "จากแคช" : "อัปเดต"} · ${bkkTime(data.fetched_at)}` : "ยังไม่มีข้อมูล";
     for (const button of $("#chart-frames").querySelectorAll("button")) button.classList.toggle("active", button.dataset.frame === state.chartFrame);
     if (!bars.length) { container.innerHTML = `<div class="chart-empty">${state.busy ? "กำลังเปิดกราฟ…" : "ยังไม่มีกราฟสำหรับหุ้นนี้"}</div>`; return; }
     const library = window.LightweightCharts;
     if (!library?.createChart) { container.innerHTML = `<div class="chart-empty">กราฟโหลดไม่สำเร็จ กรุณารีเฟรชหน้า</div>`; return; }
     const chart = library.createChart(container, {
-      width: container.clientWidth, height: container.clientHeight, layout: { background: { color: "#0d1013" }, textColor: "#9fa39d", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 },
-      grid: { vertLines: { color: "#20252a" }, horzLines: { color: "#20252a" } },
-      rightPriceScale: { borderColor: "#35383e" }, timeScale: { borderColor: "#35383e", timeVisible: state.chartFrame !== "D" },
+      width: container.clientWidth, height: container.clientHeight, layout: { background: { color: "#030405" }, textColor: "#b5bac0", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 },
+      grid: { vertLines: { color: "#1a1e21" }, horzLines: { color: "#1a1e21" } },
+      rightPriceScale: { borderColor: "#34383d" }, timeScale: { borderColor: "#34383d", timeVisible: state.chartFrame !== "D" },
       crosshair: { vertLine: { color: "#d4af3777" }, horzLine: { color: "#d4af3777" } },
       handleScroll: { horzTouchDrag: true, vertTouchDrag: false }
     });
-    const candles = chart.addSeries(library.CandlestickSeries, { upColor: "#68c299", downColor: "#e4545e", borderVisible: false, wickUpColor: "#68c299", wickDownColor: "#e4545e" });
+    const candles = chart.addSeries(library.CandlestickSeries, { upColor: "#27d98b", downColor: "#ff5363", borderVisible: false, wickUpColor: "#27d98b", wickDownColor: "#ff5363" });
     candles.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
     const volume = chart.addSeries(library.HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-    volume.setData(bars.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "#68c29966" : "#e4545e66" })));
+    volume.setData(bars.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "#27d98b66" : "#ff536366" })));
     chart.priceScale("volume").applyOptions({ visible: false, scaleMargins: { top: .83, bottom: 0 } });
     const closes = bars.map((bar) => bar.close);
     [[9, "#d4af37"], [21, "#ded9cc"]].forEach(([period, color]) => {
@@ -211,7 +288,7 @@
     $("#decision-note").innerHTML = `<strong>เช็กก่อนเลือกสัญญา</strong><p>${warnings.length ? warnings.map(esc).join(" · ") : "bid/ask และสภาพคล่องเบื้องต้นอยู่ในช่วงที่อ่านค่าได้"}</p><p>ต้นทุนคำนวณจากราคา Ask × ${multiplier} · ยังไม่มีจุดเข้า / TP / SL ที่ผ่านการทดสอบ</p><small>Quote ณ ${bkkTime(selected.quote_time || chain(state.side)?.fetched_at)}</small>`;
   }
 
-  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderChart(); renderOi(); renderContract(); }
+  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderChart(); renderOi(); renderContract(); }
 
   async function edge(action, body) {
     const { data, error } = await state.db.functions.invoke("refresh-stock-prices", { body: { action, ...body } });
@@ -225,10 +302,11 @@
   }
 
   function demoBars(seed, frame) {
-    const step = frame === "D" ? 86400 : frame === "M240" ? 14400 : 3600;
-    const base = Math.floor(Date.now() / 1000 / step) * step - 180 * step;
+    const step = frame === "D" ? 86400 : frame === "M240" ? 14400 : frame === "M1" ? 60 : 3600;
+    const length = frame === "M1" ? 780 : 180;
+    const base = Math.floor(Date.now() / 1000 / step) * step - length * step;
     let last = seed;
-    return Array.from({ length: 180 }, (_, index) => {
+    return Array.from({ length }, (_, index) => {
       const move = Math.sin(index / 7) * .0038 + Math.cos(index / 15) * .0024 + (index > 155 ? .005 : .00028);
       const open = last, close = open * (1 + move);
       last = close;
@@ -261,10 +339,14 @@
       return { bars: bars.map((bar) => ({ ...bar, open: bar.open * scale, high: bar.high * scale, low: bar.low * scale, close: bar.close * scale })), fetched_at: new Date().toISOString(), cached: false };
     }
     if (!instrumentId) return null;
-    return edge("chart", { instrument_id: instrumentId, timespan: frame });
+    const cached = await edge("chart", { instrument_id: instrumentId, timespan: frame });
+    if (!cached?.stale) return cached;
+    try { return await edge("chart", { instrument_id: instrumentId, timespan: frame, refresh: true }); }
+    catch (error) { return { ...cached, stale: true, refresh_error: error.message }; }
   }
 
   async function loadWatchlist() {
+    state.lastWatchlistReadAt = Date.now();
     if (demo) {
       state.watchlist = ["SKHY", "CRWV", "NVDA", "AMD", "MU", "TSLA"].map((symbol) => ({ symbol, name: "ข้อมูลตัวอย่าง", id: symbol }));
       state.pulse = state.watchlist.map((item) => ({ symbol: item.symbol, price: demoChain(item.symbol, "call").underlying.price }));
@@ -296,35 +378,47 @@
     return data?.[0]?.id || null;
   }
 
-  async function loadSymbol(symbol, { expiry = "", refresh = false } = {}) {
+  async function loadSymbol(symbol, { expiry = "", refresh = false, options = true, chartFrames = null, background = false } = {}) {
     const normalized = String(symbol || "").trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) { setStatus("กรอก ticker หุ้นสหรัฐให้ถูกต้อง", true); return; }
+    if (state.busy && background) return;
     const requestId = ++state.requestId;
     const symbolChanged = normalized !== state.symbol;
+    const frames = symbolChanged ? ["M1", "M60"] : Array.isArray(chartFrames) ? chartFrames : refresh ? ["M1", "M60"] : [];
     state.symbol = normalized;
     state.busy = true;
     state.lastError = "";
     if (symbolChanged) { state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; }
-    setStatus("กำลังอ่านราคา กราฟ และ option chain…");
+    if (!background) setStatus("กำลังอ่านราคา กราฟ และ option chain…");
     renderAll();
     try {
       const instrumentId = symbolChanged || !state.instrumentId ? await resolveInstrument(normalized) : state.instrumentId;
-      const [callResult, putResult, ...chartResults] = await Promise.allSettled([
-        getOptionChain(normalized, "call", expiry), getOptionChain(normalized, "put", expiry),
-        ...((symbolChanged || refresh) ? ["M60", "M240", "D"].map((frame) => getChart(instrumentId, frame, normalized)) : [])
+      const startedAt = Date.now();
+      if (options) state.lastOptionAttemptAt = startedAt;
+      frames.forEach((frame) => { state.lastChartAttemptAt[frame] = startedAt; });
+      const results = await Promise.allSettled([
+        ...(options ? [getOptionChain(normalized, "call", expiry), getOptionChain(normalized, "put", expiry)] : []),
+        ...frames.map((frame) => getChart(instrumentId, frame, normalized))
       ]);
       if (requestId !== state.requestId) return;
+      const callResult = options ? results[0] : null;
+      const putResult = options ? results[1] : null;
+      const chartResults = results.slice(options ? 2 : 0);
       state.instrumentId = instrumentId;
-      state.call = callResult.status === "fulfilled" ? callResult.value : null;
-      state.put = putResult.status === "fulfilled" ? putResult.value : null;
-      state.expiry = state.call?.expiry || state.put?.expiry || expiry;
-      if (symbolChanged || refresh) ["M60", "M240", "D"].forEach((frame, index) => { state.charts[frame] = chartResults[index]?.status === "fulfilled" ? chartResults[index].value : null; });
-      const errors = [callResult, putResult].filter((result) => result.status === "rejected").map((result) => result.reason?.message || "Option chain unavailable");
-      if (!instrumentId && !demo) errors.push("กราฟใช้ได้เฉพาะหุ้นที่อยู่ในรายการ instruments ของ PCC");
-      if (state.call || state.put) setStatus(errors.length ? `ข้อมูลบางส่วนยังไม่พร้อม: ${[...new Set(errors)].join(" · ")}` : "");
-      else setStatus(errors.length ? [...new Set(errors)].join(" · ") : "ไม่พบ option chain", true);
+      if (options) {
+        if (callResult.status === "fulfilled") state.call = callResult.value;
+        if (putResult.status === "fulfilled") state.put = putResult.value;
+        state.expiry = state.call?.expiry || state.put?.expiry || expiry;
+      }
+      frames.forEach((frame, index) => { if (chartResults[index]?.status === "fulfilled") state.charts[frame] = chartResults[index].value; });
+      const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason?.message || "แหล่งข้อมูลไม่พร้อม");
+      for (const result of chartResults) if (result.status === "fulfilled" && result.value?.refresh_error) errors.push(`กราฟ: ${result.value.refresh_error}`);
+      if (!instrumentId && frames.length && !demo) errors.push("กราฟใช้ได้เฉพาะหุ้นที่อยู่ในรายการ instruments ของ PCC");
+      if (errors.some((message) => /429|rate.?limit|too many requests/i.test(message))) state.quotaPauseUntil = Date.now() + 10 * 60_000;
+      setStatus(errors.length ? `ข้อมูลบางส่วนยังไม่พร้อม: ${[...new Set(errors)].join(" · ")}` : "", errors.length > 0);
     } catch (error) {
       if (requestId !== state.requestId) return;
+      if (/429|rate.?limit|too many requests/i.test(error.message)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(error.message || "อ่านข้อมูลไม่สำเร็จ", true);
     } finally {
       if (requestId === state.requestId) { state.busy = false; renderAll(); }
@@ -387,8 +481,19 @@
   $("#watch-search").addEventListener("input", (event) => { state.search = event.target.value.trim().toUpperCase(); renderWatchlist(); });
   $("#watch-list").addEventListener("click", (event) => { const button = event.target.closest("[data-symbol]"); if (button) loadSymbol(button.dataset.symbol); });
   $("#symbol-form").addEventListener("submit", (event) => { event.preventDefault(); loadSymbol($("#symbol-input").value); });
-  $("#refresh-button").addEventListener("click", () => loadSymbol(state.symbol, { expiry: state.expiry, refresh: true }));
-  $("#chart-frames").addEventListener("click", (event) => { const button = event.target.closest("[data-frame]"); if (button) { state.chartFrame = button.dataset.frame; renderChart(); } });
+  $("#refresh-button").addEventListener("click", () => {
+    if (Date.now() - state.lastManualAt < 30_000) { setStatus("เพิ่งรีเฟรชไป · รออย่างน้อย 30 วินาทีเพื่อถนอมโควต้า"); return; }
+    state.lastManualAt = Date.now();
+    loadSymbol(state.symbol, { expiry: state.expiry, refresh: true });
+  });
+  $("#chart-frames").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-frame]");
+    if (!button) return;
+    state.chartFrame = button.dataset.frame;
+    renderChart();
+    const sourceFrame = ["M5", "M15"].includes(state.chartFrame) ? "M1" : state.chartFrame;
+    if (!state.charts[sourceFrame] && !state.busy) void loadSymbol(state.symbol, { options: false, chartFrames: [sourceFrame] });
+  });
   $("#expiry-select").addEventListener("change", (event) => loadSymbol(state.symbol, { expiry: event.target.value }));
   $("#option-side").addEventListener("click", (event) => { const button = event.target.closest("[data-side]"); if (button) { state.side = button.dataset.side; state.contractSymbol = ""; renderContract(); } });
   $("#contract-list").addEventListener("click", (event) => { const button = event.target.closest("[data-contract]"); if (button) { state.contractSymbol = button.dataset.contract; renderContract(); } });
@@ -401,6 +506,29 @@
     renderContract();
     if (matchMedia("(max-width: 760px)").matches) $(".contract-panel").scrollIntoView({ behavior: "smooth" });
   });
+
+  async function maybeAutoRefresh() {
+    renderDataStatus();
+    if (demo || !state.user || !state.symbol || state.busy || document.hidden || !marketOpenNow()) return;
+    if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
+    if (Date.now() - state.lastWatchlistReadAt >= 15 * 60_000) {
+      try { await loadWatchlist(); } catch (error) { setStatus(`Watchlist: ${error.message}`, true); }
+    }
+    const now = Date.now();
+    const needOptions = now - state.lastOptionAttemptAt >= OPTION_POLL_MS;
+    const frames = [];
+    if (now - (state.lastChartAttemptAt.M1 || 0) >= MINUTE_POLL_MS) frames.push("M1");
+    if (now - (state.lastChartAttemptAt.M60 || 0) >= HOUR_POLL_MS) frames.push("M60");
+    if (needOptions || frames.length) await loadSymbol(state.symbol, { expiry: state.expiry, options: needOptions, chartFrames: frames, background: true });
+  }
+
+  document.addEventListener("pointerdown", () => { state.lastInteractionAt = Date.now(); }, { passive: true });
+  document.addEventListener("keydown", () => { state.lastInteractionAt = Date.now(); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { state.lastInteractionAt = Date.now(); void maybeAutoRefresh(); }
+    else renderDataStatus();
+  });
+  window.setInterval(() => { void maybeAutoRefresh(); }, 30_000);
 
   init();
 })();

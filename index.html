@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#090a0c">
+  <meta name="theme-color" content="#020304">
   <meta name="description" content="Option Signal Desk — ดูทิศทางหุ้น, OI และสัญญาออปชันจากข้อมูล PCC ในหน้าเดียว">
   <title>Option Signal Desk · PCC</title>
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -48,16 +48,18 @@
         </section>
 
         <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
+        <div class="data-status" aria-label="สถานะข้อมูล"><span id="refresh-policy">กำลังตรวจรอบรีเฟรช</span><span id="option-freshness">Option quote —</span><span id="minute-freshness">กราฟ 1m —</span></div>
 
         <section class="signal-strip" aria-labelledby="signal-title">
-          <div class="section-head"><div><span class="index">03 / PRICE CONTEXT</span><h2 id="signal-title">ทิศทางหลายช่วงเวลา</h2></div><span class="section-aside">คำนวณจาก EMA9 / EMA21 ของแท่งราคา</span></div>
+          <div class="section-head"><div><span class="index">03 / MULTI-TIMEFRAME</span><h2 id="signal-title">เช็กทิศทาง 4 ช่วงเวลา</h2></div><span class="section-aside">แท่งปิด · EMA9 / EMA21 + RSI14</span></div>
           <div class="signal-grid" id="signal-grid"></div>
           <div class="signal-verdict" id="signal-verdict"></div>
-          <p class="fine-print">1m / 5m / 15m ยังไม่ได้เชื่อมใน PCC · สถานะนี้เป็นแนวโน้ม ไม่ใช่จุดเข้าแบบ 4/4</p>
+          <div class="option-signal" id="option-signal"></div>
+          <p class="fine-print">4/4 หมายถึงทิศทางราคาหุ้นตรงกัน ไม่ใช่ความน่าจะเป็นชนะหรือสัญญาณให้กดซื้อ · ข้อมูลเก่า/ตลาดปิด = WAIT</p>
         </section>
 
         <section class="chart-section" aria-labelledby="chart-title">
-          <div class="section-head"><div><span class="index">04 / PRICE CHART</span><h2 id="chart-title">กราฟหุ้นอ้างอิง</h2></div><div class="segmented" id="chart-frames" role="group" aria-label="เลือกช่วงเวลากราฟ"><button type="button" data-frame="M60" class="active">1H</button><button type="button" data-frame="M240">4H</button><button type="button" data-frame="D">1D</button></div></div>
+          <div class="section-head"><div><span class="index">04 / PRICE CHART</span><h2 id="chart-title">กราฟหุ้นอ้างอิง</h2></div><div class="segmented" id="chart-frames" role="group" aria-label="เลือกช่วงเวลากราฟ"><button type="button" data-frame="M1" class="active">1m</button><button type="button" data-frame="M5">5m</button><button type="button" data-frame="M15">15m</button><button type="button" data-frame="M60">1h</button><button type="button" data-frame="M240">4h</button><button type="button" data-frame="D">1D</button></div></div>
           <div id="price-chart" class="price-chart" role="img" aria-label="กราฟแท่งเทียนของหุ้นอ้างอิง"></div>
           <div class="chart-footer"><span>แท่งเทียน + EMA9 / EMA21</span><span id="chart-freshness">—</span></div>
         </section>
@@ -66,7 +68,7 @@
           <div class="section-head oi-heading"><div><span class="index">05 / OPTION POSITIONING</span><h2 id="oi-title">OI รอบราคาปัจจุบัน</h2></div><label class="expiry-control">วันหมดอายุ <select id="expiry-select" aria-label="วันหมดอายุ"></select></label></div>
           <div class="oi-summary" id="oi-summary"></div>
           <div class="oi-table-wrap"><table class="oi-table"><thead><tr><th>CALL OI</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>STRIKE</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>PUT OI</th></tr></thead><tbody id="oi-rows"></tbody></table></div>
-          <p class="fine-print">แสดงเฉพาะสัญญาใกล้ราคา สูงสุด 20 strike ต่อฝั่ง · OI ไม่บอกทิศทางผู้ซื้อหรือผู้ขาย และยังไม่มีประวัติ OI เพื่อเทียบวันก่อน</p>
+          <p class="fine-print">แสดงเฉพาะสัญญาใกล้ราคา สูงสุด 20 strike ต่อฝั่ง · OI เป็นยอดจากการประมวลผลสิ้นวัน ไม่ใช่ค่าที่วิ่งตาม quote และยังไม่มีประวัติเทียบวันก่อน</p>
         </section>
       </main>
 
@@ -96,6 +98,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="config.js"></script>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
