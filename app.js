@@ -347,7 +347,9 @@
     }
     if (!instrumentId) return null;
     const cached = await edge("chart", { instrument_id: instrumentId, timespan: frame });
-    if (!cached?.stale) return cached;
+    const latestClosedHour = frame === "M60" ? closedBars(cached?.bars, 60).at(-1) : null;
+    const hourNeedsRefresh = frame === "M60" && marketOpenNow() && (!latestClosedHour || Date.now() - (latestClosedHour.time + 3600) * 1000 > 65 * 60_000);
+    if (!cached?.stale && !hourNeedsRefresh) return cached;
     try { return await edge("chart", { instrument_id: instrumentId, timespan: frame, refresh: true }); }
     catch (error) { return { ...cached, stale: true, refresh_error: error.message }; }
   }
