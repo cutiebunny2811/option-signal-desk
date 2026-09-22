@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090a0c">
+  <meta name="description" content="Option Signal Desk — ดูทิศทางหุ้น, OI และสัญญาออปชันจากข้อมูล PCC ในหน้าเดียว">
+  <title>Option Signal Desk · PCC</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell" id="app-shell" hidden>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Option Signal Desk หน้าแรก">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>OPTION SIGNAL DESK</strong><small>เชื่อมข้อมูล PCC</small></span>
+      </a>
+      <div class="topbar-right">
+        <span class="market-status" id="market-status">รอตรวจข้อมูล</span>
+        <span class="account-name" id="account-name"></span>
+        <button class="quiet-button" type="button" id="sign-out">ออกจากระบบ</button>
+      </div>
+    </header>
+
+    <div class="desk-layout">
+      <aside class="watch-panel" aria-label="รายชื่อหุ้น">
+        <div class="panel-title"><span class="index">01 / WATCHLIST</span><h2>หุ้นที่ติดตาม</h2></div>
+        <label class="search-field"><span class="sr-only">ค้นหาหุ้น</span><input id="watch-search" type="search" placeholder="ค้นหา ticker" autocomplete="off" spellcheck="false"><span aria-hidden="true">⌕</span></label>
+        <div class="watch-list" id="watch-list"></div>
+        <p class="watch-note">เพิ่มหรือลบหุ้นใน PCC · ที่นี่ใช้รายการเดียวกัน</p>
+      </aside>
+
+      <main class="main-panel">
+        <section class="instrument-head" aria-labelledby="symbol-title">
+          <div class="instrument-identity">
+            <div class="eyebrow"><span class="index">02 / UNDERLYING</span><span class="source-pill" id="source-pill">รอข้อมูล</span></div>
+            <div class="ticker-line"><h1 id="symbol-title">—</h1><span class="ticker-price" id="spot-price">—</span><span class="ticker-change" id="spot-change"></span></div>
+            <p class="muted" id="spot-time">เลือกหุ้นเพื่อดูข้อมูล</p>
+          </div>
+          <div class="head-actions">
+            <form id="symbol-form" class="symbol-form"><label class="sr-only" for="symbol-input">สัญลักษณ์หุ้น</label><input id="symbol-input" name="symbol" maxlength="10" placeholder="Ticker เช่น NVDA" spellcheck="false" autocomplete="off" required><button type="submit">ดูหุ้น</button></form>
+            <button type="button" class="quiet-button refresh-button" id="refresh-button">↻ รีเฟรช</button>
+          </div>
+        </section>
+
+        <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
+
+        <section class="signal-strip" aria-labelledby="signal-title">
+          <div class="section-head"><div><span class="index">03 / PRICE CONTEXT</span><h2 id="signal-title">ทิศทางหลายช่วงเวลา</h2></div><span class="section-aside">คำนวณจาก EMA9 / EMA21 ของแท่งราคา</span></div>
+          <div class="signal-grid" id="signal-grid"></div>
+          <div class="signal-verdict" id="signal-verdict"></div>
+          <p class="fine-print">1m / 5m / 15m ยังไม่ได้เชื่อมใน PCC · สถานะนี้เป็นแนวโน้ม ไม่ใช่จุดเข้าแบบ 4/4</p>
+        </section>
+
+        <section class="chart-section" aria-labelledby="chart-title">
+          <div class="section-head"><div><span class="index">04 / PRICE CHART</span><h2 id="chart-title">กราฟหุ้นอ้างอิง</h2></div><div class="segmented" id="chart-frames" role="group" aria-label="เลือกช่วงเวลากราฟ"><button type="button" data-frame="M60" class="active">1H</button><button type="button" data-frame="M240">4H</button><button type="button" data-frame="D">1D</button></div></div>
+          <div id="price-chart" class="price-chart" role="img" aria-label="กราฟแท่งเทียนของหุ้นอ้างอิง"></div>
+          <div class="chart-footer"><span>แท่งเทียน + EMA9 / EMA21</span><span id="chart-freshness">—</span></div>
+        </section>
+
+        <section class="oi-section" aria-labelledby="oi-title">
+          <div class="section-head oi-heading"><div><span class="index">05 / OPTION POSITIONING</span><h2 id="oi-title">OI รอบราคาปัจจุบัน</h2></div><label class="expiry-control">วันหมดอายุ <select id="expiry-select" aria-label="วันหมดอายุ"></select></label></div>
+          <div class="oi-summary" id="oi-summary"></div>
+          <div class="oi-table-wrap"><table class="oi-table"><thead><tr><th>CALL OI</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>STRIKE</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>PUT OI</th></tr></thead><tbody id="oi-rows"></tbody></table></div>
+          <p class="fine-print">แสดงเฉพาะสัญญาใกล้ราคา สูงสุด 20 strike ต่อฝั่ง · OI ไม่บอกทิศทางผู้ซื้อหรือผู้ขาย และยังไม่มีประวัติ OI เพื่อเทียบวันก่อน</p>
+        </section>
+      </main>
+
+      <aside class="contract-panel" aria-label="รายละเอียดสัญญาออปชัน">
+        <div class="panel-title"><span class="index">06 / CONTRACT LENS</span><h2>เลือกสัญญา</h2></div>
+        <div class="segmented side-switch" id="option-side" role="group" aria-label="เลือกฝั่งสัญญา"><button type="button" data-side="call" class="active">CALL</button><button type="button" data-side="put">PUT</button></div>
+        <p class="contract-hint">เลือก strike จากตาราง OI หรือรายการด้านล่าง</p>
+        <div class="contract-list" id="contract-list"></div>
+        <div class="contract-detail" id="contract-detail"></div>
+        <div class="decision-note" id="decision-note"></div>
+      </aside>
+    </div>
+    <footer class="site-footer"><span>OPTION SIGNAL DESK / PCC DATA</span><span>ข้อมูลเพื่อประกอบการตัดสินใจ · ไม่มีการส่งคำสั่งซื้อขายจากหน้านี้</span></footer>
+  </div>
+
+  <main class="auth-shell" id="auth-shell" hidden>
+    <div class="auth-card">
+      <span class="index">PCC / OPTION SIGNAL DESK</span>
+      <h1>เข้าใจ option<br>ก่อนเลือกสัญญา</h1>
+      <p>ใช้บัญชีเดียวกับ Portfolio Command Center เพื่อดู watchlist, ราคาหุ้น และข้อมูล OPRA ตามสิทธิ์ของคุณ</p>
+      <form id="login-form" class="login-form"><label>อีเมล<input name="email" type="email" autocomplete="username" required></label><label>รหัสผ่าน<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">เข้าสู่ Dashboard</button></form>
+      <p class="auth-message" id="auth-message" role="status"></p>
+      <small>ระบบนี้อ่านข้อมูลอย่างเดียว · จัดการบัญชีและพอร์ตที่ PCC</small>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
