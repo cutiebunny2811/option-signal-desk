@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -64,9 +64,10 @@
           <div class="chart-footer"><span>แท่งเทียน + EMA9 / EMA21 · ระดับแผนจากกราฟ 5m</span><span id="chart-freshness">—</span></div>
           <div class="level-panel" aria-label="ระดับราคาและแผนเงื่อนไข">
             <div class="level-heading"><strong>ระดับที่เฝ้าดู</strong><div class="level-header-right"><div class="level-side" id="level-side" role="group" aria-label="เลือกฝั่งเพื่อดูระดับจำลอง"><button type="button" data-level-side="auto" aria-pressed="true">ตามสัญญาณ</button><button type="button" data-level-side="call" aria-pressed="false">CALL</button><button type="button" data-level-side="put" aria-pressed="false">PUT</button></div><span id="level-status">กำลังอ่านแท่งราคา</span></div></div>
+            <div class="plan-workflow waiting" id="plan-workflow"></div>
             <div class="level-grid" id="level-grid"></div>
             <p class="level-note" id="level-note">ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option</p>
-            <details class="level-method"><summary>สูตรคำนวณระดับราคา</summary><div><p>EMA9 / EMA21 = ค่าเฉลี่ยราคาปิดที่ให้น้ำหนักแท่งใหม่มากกว่า · ATR14 = ความผันผวนเฉลี่ยจากช่วงสูง–ต่ำและช่องว่างราคา</p><p>Forecast* = ต่อความชัน EMA9 ของ 3 แท่ง 5m ล่าสุดไปอีก 15 นาที เป็นเพียงเส้นประมาณ ไม่ใช่ราคาที่คาดว่าจะเกิดจริง</p><p>Entry = ทะลุสูงสุด/ต่ำสุดของ 10 แท่ง 5m ที่ปิดแล้ว ± 0.1 ATR · SL = นอก swing 5 แท่งอย่างน้อย 0.8 ATR · R = ระยะ Entry ถึง SL · TP1 = 1R · TP2 = 1.8R</p><p>“ตามสัญญาณ” ใช้แนว 5m/15m หรือ 4/4 ที่ตรงกัน; กด CALL/PUT เพื่อดูระดับจำลองอีกฝั่งได้แม้เป็น WAIT ระดับสีจางไม่ใช่สัญญาณสด แผนสดสีเด่นต้องมี 4/4, Option quote สด และ R ไม่กว้างเกิน 3 ATR</p></div></details>
+            <details class="level-method"><summary>สูตรและกติกาแผนเข้า</summary><div><p>EMA9 / EMA21 = ค่าเฉลี่ยราคาปิดที่ให้น้ำหนักแท่งใหม่มากกว่า · ATR14 = ความผันผวนเฉลี่ยจากช่วงสูง–ต่ำและช่องว่างราคา</p><p>Forecast* = ต่อความชัน EMA9 ของ 3 แท่ง 5m ล่าสุดไปอีก 15 นาที เป็นเพียงเส้นประมาณ ไม่ใช่ราคาที่คาดว่าจะเกิดจริง</p><p>Entry = ทะลุสูงสุด/ต่ำสุดของ 10 แท่ง 5m ที่ปิดแล้ว ± 0.1 ATR · SL = นอก swing 5 แท่งอย่างน้อย 0.8 ATR · R = ระยะ Entry ถึง SL · TP1 = 1R · TP2 = 1.8R</p><p>แผนจะล็อกเฉพาะโหมด “ตามสัญญาณ” เมื่อกราฟสด, 4/4 ตรง, R ไม่เกิน 3 ATR และสัญญาที่เลือกมี quote ไม่เกิน 5 นาที, bid/ask ถูกต้อง, spread ≤10%, volume ≥10, OI ≥100 (เกณฑ์เริ่มต้น ไม่ใช่การรับประกันสภาพคล่อง) จากนั้นรอแท่ง 1m ใหม่ปิดผ่าน Entry ภายใน 30 นาที; ข้อมูลขาดช่วง, gap เลย Entry หรือแท่งกำกวมจะหยุดแผน ไม่ไล่ราคา กด CALL/PUT เพื่อดูระดับจำลองเท่านั้น</p></div></details>
           </div>
         </section>
 
@@ -105,6 +106,7 @@
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="config.js"></script>
   <script src="price-levels.js?v=2"></script>
-  <script src="app.js?v=11"></script>
+  <script src="trade-plan.js?v=1"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

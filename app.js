@@ -3,6 +3,7 @@
 
   const config = window.__OPTION_DESK_CONFIG__;
   const priceLevels = window.OptionDeskLevels;
+  const tradePlan = window.OptionDeskTradePlan;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -20,7 +21,8 @@
     call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M1",
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {}, lastWatchlistReadAt: 0,
-    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto"
+    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto",
+    tradePlan: null, optionGate: null, planBlock: ""
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
@@ -176,7 +178,58 @@
     const callReady = tone === "up" && quoteFresh("call");
     const putReady = tone === "down" && quoteFresh("put");
     state.planDirection = callReady ? "up" : putReady ? "down" : "wait";
-    $("#option-signal").innerHTML = `<div class="option-lane ${callReady ? "active call" : ""}"><span>CALL / ฝั่งขึ้น</span><strong>${callReady ? "เฝ้าดู" : "WAIT"}</strong><small>${callReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div><div class="option-lane ${putReady ? "active put" : ""}"><span>PUT / ฝั่งลง</span><strong>${putReady ? "เฝ้าดู" : "WAIT"}</strong><small>${putReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+    $("#option-signal").innerHTML = `<div class="option-lane ${callReady ? "active call" : ""}"><span>CALL / ฝั่งขึ้น</span><strong>${callReady ? "ทิศทางผ่าน" : "WAIT"}</strong><small>${callReady ? "4/4 · ยังไม่ใช่จุดเข้า" : "ยังไม่ครบเงื่อนไข"}</small></div><div class="option-lane ${putReady ? "active put" : ""}"><span>PUT / ฝั่งลง</span><strong>${putReady ? "ทิศทางผ่าน" : "WAIT"}</strong><small>${putReady ? "4/4 · ยังไม่ใช่จุดเข้า" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+  }
+
+  function tradingDate(now = Date.now()) {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(now));
+    const value = (type) => parts.find((part) => part.type === type)?.value || "";
+    return `${value("year")}-${value("month")}-${value("day")}`;
+  }
+
+  function planStorageKey() { return `option-desk:plan:v1:${state.user?.id || "demo"}:${state.symbol}`; }
+  function readStoredPlan() {
+    try {
+      const plan = JSON.parse(localStorage.getItem(planStorageKey()) || "null");
+      if (!plan || plan.symbol !== state.symbol || plan.sessionKey !== tradingDate()
+        || !["armed", "triggered", "tp1", "tp2", "stopped", "cancelled", "missed", "ambiguous", "data_gap", "session_end"].includes(plan.status)
+        || ![plan.entry, plan.stop, plan.tp1, plan.tp2, plan.risk, plan.basedOn, plan.lastSeenBarTime, plan.createdAt].every(Number.isFinite)
+        || typeof plan.contractSymbol !== "string") return null;
+      return plan;
+    } catch (_) { return null; }
+  }
+  function savePlan() {
+    try {
+      if (state.tradePlan) localStorage.setItem(planStorageKey(), JSON.stringify(state.tradePlan));
+      else localStorage.removeItem(planStorageKey());
+    } catch (_) { /* The dashboard still works without browser storage. */ }
+  }
+
+  function selectedTradeContract(direction) {
+    const side = direction === "up" ? "call" : direction === "down" ? "put" : "";
+    return state.side === side ? contracts(side).find((row) => row.symbol === state.contractSymbol) : null;
+  }
+
+  function updateTradePlan() {
+    if (!tradePlan?.reconcile || !state.symbol || state.busy) return;
+    const bars = barsFor("M5"), minuteBars = barsFor("M1"), source = sourceFor("M5");
+    const lastFive = bars.at(-1), lastMinute = minuteBars.at(-1);
+    const direction = state.planDirection !== "wait" ? state.planDirection : state.tradePlan?.direction || "wait";
+    const candidate = direction !== "wait" ? priceLevels.calculate(bars, direction) : null;
+    const now = Date.now();
+    const chartFresh = Boolean(lastFive && lastMinute && !source?.stale
+      && now - (lastFive.time + 300) * 1000 <= 8 * 60_000
+      && now - (lastMinute.time + 60) * 1000 <= 4 * 60_000);
+    const result = tradePlan.reconcile(state.tradePlan, {
+      symbol: state.symbol, sessionKey: tradingDate(now), candidate,
+      confirmed: state.planDirection === direction && direction !== "wait" && !candidate?.wideRisk,
+      marketOpen: marketOpenNow(), chartFresh,
+      contract: selectedTradeContract(direction), bars: minuteBars, now
+    });
+    state.tradePlan = result.plan;
+    state.optionGate = result.option;
+    state.planBlock = result.block || "";
+    savePlan();
   }
 
   function levelState() {
@@ -191,13 +244,41 @@
     const watchDirection = five === fifteen && five !== "wait" ? five : "wait";
     const direction = state.levelSide === "call" ? "up" : state.levelSide === "put" ? "down"
       : state.planDirection !== "wait" ? state.planDirection : watchDirection;
-    const plan = recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null;
-    const livePlan = Boolean(plan && !plan.wideRisk && fresh && state.planDirection === direction);
-    return { indicators, plan, fresh, source, livePlan, recentHistory };
+    const tracked = state.levelSide === "auto" ? state.tradePlan : null;
+    const plan = tracked || (recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null);
+    const livePlan = Boolean(tracked && ["armed", "triggered", "tp1"].includes(tracked.status) && fresh);
+    return { indicators, plan, fresh, source, livePlan, recentHistory, tracked };
+  }
+
+  function renderPlanWorkflow(tracked) {
+    const box = $("#plan-workflow");
+    const lastMinute = barsFor("M1").at(-1);
+    const labels = { armed: "เฝ้าทะลุ · ยังไม่เข้า", triggered: "ทะลุยืนยัน · ตรวจ Option", tp1: "ราคาหุ้นแตะ TP1", tp2: "ราคาหุ้นแตะ TP2", stopped: "ราคาหุ้นแตะ SL", cancelled: "ยกเลิก setup", missed: "พลาดจุดเข้า · ไม่ไล่ราคา", ambiguous: "ลำดับราคาไม่ชัด", data_gap: "ข้อมูลขาดช่วง · หยุดแผน", session_end: "จบรอบตลาด" };
+    const active = tracked && ["armed", "triggered", "tp1"].includes(tracked.status);
+    const tone = tracked?.direction === "down" ? "down" : "up";
+    const manual = state.levelSide !== "auto";
+    const title = manual ? "โหมดจำลอง · ไม่ใช่จุดเข้า" : tracked ? labels[tracked.status] || "รอข้อมูล" : "รอ setup ที่ครบเงื่อนไข";
+    let detail = "";
+    if (manual) detail = `กำลังดูฝั่ง ${state.levelSide.toUpperCase()} แบบจำลอง · ${state.tradePlan ? "แผนที่ล็อกจริงยังอยู่ กด ‘ตามสัญญาณ’ เพื่อกลับไปดู" : "ยังไม่มีแผนที่ล็อก"}`;
+    else if (tracked?.status === "armed") {
+      const close = lastMinute?.close;
+      const distance = close === undefined ? null : Math.abs(tracked.entry - close);
+      detail = `รอแท่ง 1m ปิด${tracked.direction === "up" ? "เหนือ" : "ต่ำกว่า"} ${money(tracked.entry)} · ล่าสุด ${money(close)} · ห่าง ${money(distance)} · หมดอายุ ${bkkTime(tracked.expiresAt)}`;
+    } else if (tracked?.status === "triggered" || tracked?.status === "tp1") {
+      const quote = tracked.detectedQuote;
+      detail = `แท่ง 1m ปิดผ่าน ${money(tracked.entry)} ณ ${bkkTime(tracked.triggeredAt || tracked.statusAt)} · ${tracked.status === "tp1" ? "แตะ TP1 แล้ว · " : ""}${quote ? `Option bid/ask ตอนตรวจพบ ${money(quote.bid)} / ${money(quote.ask)} (quote ${bkkTime(quote.quoteAt)}) · ` : ""}ตรวจราคาใน broker ก่อนตัดสินใจ`;
+    } else if (tracked) detail = `${tracked.reason || "แผนสิ้นสุด"} · ${bkkTime(tracked.statusAt)}`;
+    else if (!marketOpenNow()) detail = "ตลาดปิด · ไม่สร้างสัญญาณเข้าใหม่";
+    else if (state.planDirection === "wait") detail = "รอ 1m / 5m / 15m / 1h ตรงกัน 4/4 และข้อมูลสด";
+    else if (state.optionGate && !state.optionGate.ok) detail = `เลือกสัญญา${state.planDirection === "up" ? " CALL" : " PUT"} ที่ผ่านเกณฑ์ · ${state.optionGate.reasons.join(" · ")}`;
+    else detail = state.planBlock || "รอข้อมูลกราฟ 1m / 5m ที่ปิดครบและสด";
+    const contractName = (manual ? state.tradePlan : tracked)?.contractSymbol || state.optionGate?.symbol || "ยังไม่พร้อม";
+    box.className = `plan-workflow ${!manual && active ? tone : "waiting"}`;
+    box.innerHTML = `<div class="workflow-heading"><span class="index">ENTRY WORKFLOW / ราคาหุ้น</span><strong>${esc(title)}</strong></div><p>${esc(detail)}</p><div class="workflow-meta"><span>สัญญา <b>${esc(contractName)}</b></span><span>4/4 <b>${state.planDirection !== "wait" ? "ผ่าน" : "รอ"}</b></span><span>Quote / spread <b>${state.optionGate?.ok ? "ผ่านเกณฑ์" : "รอ/ไม่ผ่าน"}</b></span><span>สถานะ <b>${manual ? "ดูจำลอง" : tracked ? active ? "ล็อกระดับ" : "สิ้นสุด" : "ยังไม่ล็อก"}</b></span></div><small>จุดเข้า/SL/TP คือราคาหุ้น ไม่ใช่ราคา Option หรือคำสั่งซื้อ · สัญญาณตรวจจากแท่งปิด อาจช้ากว่าตลาดจริง</small>`;
   }
 
   function renderLevels() {
-    const { indicators, plan, fresh, source, livePlan, recentHistory } = levelState();
+    const { indicators, plan, fresh, source, livePlan, recentHistory, tracked } = levelState();
     const status = $("#level-status");
     for (const button of $("#level-side").querySelectorAll("button")) {
       const selected = button.dataset.levelSide === state.levelSide;
@@ -206,10 +287,12 @@
     }
     $(".level-panel").classList.toggle("preview", Boolean(plan && !livePlan));
     status.className = livePlan ? `level-ready ${plan.direction}` : "level-wait";
-    status.textContent = livePlan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
-      : plan?.wideRisk ? `WAIT · ${marketOpenNow() ? "" : "ตลาดปิด · "}1R กว้างกว่า 3 ATR (${money(plan.risk)})`
-      : plan && !marketOpenNow() ? `WAIT · ตลาดปิด · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} จากรอบก่อน`
-      : plan ? `WAIT · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} ยังไม่คอนเฟิร์ม 4/4`
+    const planStatus = { armed: "เฝ้าทะลุ", triggered: "ผ่านจุดเข้า", tp1: "แตะ TP1", tp2: "แตะ TP2", stopped: "แตะ SL", cancelled: "ยกเลิก", missed: "พลาดจุดเข้า", ambiguous: "ลำดับไม่ชัด", data_gap: "ข้อมูลขาดช่วง", session_end: "จบรอบตลาด" };
+    status.textContent = tracked ? `แผน ${tracked.direction === "up" ? "CALL" : "PUT"} · ${planStatus[tracked.status] || "รอข้อมูล"} · 1R ${money(tracked.risk)}`
+      : state.levelSide !== "auto" && plan ? "ดูระดับจำลอง · ยังไม่ใช่แผนเข้า"
+      : plan?.wideRisk ? `WAIT · 1R กว้างกว่า 3 ATR (${money(plan.risk)})`
+      : plan && !marketOpenNow() ? "WAIT · ตลาดปิด · ระดับจากรอบก่อน"
+      : plan ? "WAIT · ระดับอ้างอิง 5m ยังไม่ล็อก"
       : !marketOpenNow() ? "WAIT · ตลาดปิด"
       : !recentHistory ? "WAIT · ไม่มีแท่งล่าสุดใน 4 วัน"
       : source?.stale || !fresh ? "WAIT · รอแท่ง 5m ใหม่"
@@ -226,8 +309,9 @@
     ];
     $("#level-grid").innerHTML = cells.map(([label, value, tone]) => `<div class="level-cell ${tone}"><small>${esc(label)}</small><strong>${money(value)}</strong></div>`).join("");
     $("#level-note").textContent = indicators
-      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ${livePlan ? "แผนเฝ้าดูสด" : "ระดับอ้างอิงย้อนหลัง ไม่ใช่สัญญาณสด"} · ราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
+      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ${tracked ? `ระดับล็อกตั้งแต่ ${bkkTime(tracked.createdAt)}` : "ระดับจำลอง ไม่ใช่สัญญาณเข้า"} · ราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
       : "รอแท่ง 5m ให้พอคำนวณ · ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option";
+    renderPlanWorkflow(tracked);
   }
 
   function renderDataStatus() {
@@ -358,7 +442,7 @@
   function renderContract() {
     for (const button of $("#option-side").querySelectorAll("button")) button.classList.toggle("active", button.dataset.side === state.side);
     const rows = [...contracts(state.side)].sort((a, b) => Math.abs(Number(a.strike) - Number(chain(state.side)?.underlying?.price)) - Math.abs(Number(b.strike) - Number(chain(state.side)?.underlying?.price)));
-    if (!rows.some((row) => row.symbol === state.contractSymbol)) state.contractSymbol = rows[0]?.symbol || "";
+    if (!rows.some((row) => row.symbol === state.contractSymbol)) state.contractSymbol = rows[0]?.symbol || (state.busy ? state.contractSymbol : "");
     $("#contract-list").innerHTML = rows.length ? rows.map((row) => `<button class="contract-row ${row.symbol === state.contractSymbol ? "active" : ""}" type="button" data-contract="${esc(row.symbol)}"><strong>${strikeMoney(row.strike)} ${state.side.toUpperCase()}</strong><span class="contract-ask">ASK ${money(row.ask)}</span><small>Δ ${numeric(row.delta)?.toFixed(2) ?? "—"} · OI ${count(row.open_interest)} · VOL ${count(row.volume)}</small></button>`).join("") : `<div class="empty-panel">${state.busy ? "กำลังอ่านสัญญา…" : "ไม่มีข้อมูลสัญญาฝั่งนี้"}</div>`;
     const selected = rows.find((row) => row.symbol === state.contractSymbol);
     if (!selected) { $("#contract-detail").innerHTML = `<div class="empty-panel">เลือกสัญญาเพื่อดูรายละเอียด</div>`; $("#decision-note").innerHTML = ""; return; }
@@ -378,7 +462,7 @@
     $("#decision-note").innerHTML = `<strong>เช็กก่อนเลือกสัญญา</strong><p>${warnings.length ? warnings.map(esc).join(" · ") : "bid/ask และสภาพคล่องเบื้องต้นอยู่ในช่วงที่อ่านค่าได้"}</p><p>ต้นทุนคำนวณจากราคา Ask × ${multiplier} · แผน Entry / TP / SL ใต้กราฟเป็นราคาหุ้น ไม่ใช่ option premium และยังไม่ผ่านการทดสอบย้อนหลัง</p><small>Quote ณ ${bkkTime(selected.quote_time || chain(state.side)?.fetched_at)}</small>`;
   }
 
-  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderChart(); renderLevels(); renderOi(); renderContract(); }
+  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderOi(); renderContract(); updateTradePlan(); renderChart(); renderLevels(); }
 
   async function edge(action, body) {
     const { data, error } = await state.db.functions.invoke("refresh-stock-prices", { body: { action, ...body } });
@@ -480,7 +564,12 @@
     state.symbol = normalized;
     state.busy = true;
     state.lastError = "";
-    if (symbolChanged) { state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; state.levelSide = "auto"; }
+    if (symbolChanged) {
+      state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; state.levelSide = "auto";
+      state.tradePlan = readStoredPlan();
+      state.side = state.tradePlan?.direction === "down" ? "put" : "call";
+      state.contractSymbol = state.tradePlan?.contractSymbol || "";
+    }
     if (!background) setStatus("กำลังอ่านราคา กราฟ และ option chain…");
     renderAll();
     try {
@@ -540,7 +629,7 @@
   }
 
   async function init() {
-    if (!priceLevels?.calculate || !priceLevels?.describe) {
+    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
       return;
@@ -599,8 +688,8 @@
     renderChart();
   });
   $("#expiry-select").addEventListener("change", (event) => loadSymbol(state.symbol, { expiry: event.target.value }));
-  $("#option-side").addEventListener("click", (event) => { const button = event.target.closest("[data-side]"); if (button) { state.side = button.dataset.side; state.contractSymbol = ""; renderContract(); } });
-  $("#contract-list").addEventListener("click", (event) => { const button = event.target.closest("[data-contract]"); if (button) { state.contractSymbol = button.dataset.contract; renderContract(); } });
+  $("#option-side").addEventListener("click", (event) => { const button = event.target.closest("[data-side]"); if (button) { state.side = button.dataset.side; state.contractSymbol = ""; renderContract(); updateTradePlan(); renderLevels(); renderChart(); } });
+  $("#contract-list").addEventListener("click", (event) => { const button = event.target.closest("[data-contract]"); if (button) { state.contractSymbol = button.dataset.contract; renderContract(); updateTradePlan(); renderLevels(); renderChart(); } });
   $("#oi-rows").addEventListener("click", (event) => {
     const button = event.target.closest("[data-pick-strike]");
     if (!button) return;
@@ -608,15 +697,18 @@
     const selected = contracts(state.side).find((item) => Number(item.strike) === Number(button.dataset.pickStrike));
     state.contractSymbol = selected?.symbol || "";
     renderContract();
+    updateTradePlan(); renderLevels(); renderChart();
     if (matchMedia("(max-width: 760px)").matches) $(".contract-panel").scrollIntoView({ behavior: "smooth" });
   });
 
   async function maybeAutoRefresh() {
     renderDataStatus();
     const previousPlanDirection = state.planDirection;
+    const previousPlanStatus = state.tradePlan?.status;
     renderSignals();
+    updateTradePlan();
     renderLevels();
-    if (previousPlanDirection !== state.planDirection) renderChart();
+    if (previousPlanDirection !== state.planDirection || previousPlanStatus !== state.tradePlan?.status) renderChart();
     if (demo || !state.user || !state.symbol || state.busy || document.hidden || !marketOpenNow()) return;
     if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
     if (Date.now() - state.lastWatchlistReadAt >= 15 * 60_000) {
