@@ -2,6 +2,7 @@
   "use strict";
 
   const config = window.__OPTION_DESK_CONFIG__;
+  const priceLevels = window.OptionDeskLevels;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -19,7 +20,7 @@
     call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M1",
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {}, lastWatchlistReadAt: 0,
-    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0
+    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait"
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
@@ -42,13 +43,7 @@
     line.classList.toggle("error", isError);
   }
 
-  function ema(values, period) {
-    if (!values.length) return [];
-    const multiplier = 2 / (period + 1);
-    const result = [values[0]];
-    for (let index = 1; index < values.length; index += 1) result.push(values[index] * multiplier + result[index - 1] * (1 - multiplier));
-    return result;
-  }
+  const ema = (values, period) => priceLevels.ema(values, period);
 
   function normalizeBars(input) {
     if (!Array.isArray(input)) return [];
@@ -175,7 +170,43 @@
     };
     const callReady = tone === "up" && quoteFresh("call");
     const putReady = tone === "down" && quoteFresh("put");
+    state.planDirection = callReady ? "up" : putReady ? "down" : "wait";
     $("#option-signal").innerHTML = `<div class="option-lane ${callReady ? "active call" : ""}"><span>CALL / ฝั่งขึ้น</span><strong>${callReady ? "เฝ้าดู" : "WAIT"}</strong><small>${callReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div><div class="option-lane ${putReady ? "active put" : ""}"><span>PUT / ฝั่งลง</span><strong>${putReady ? "เฝ้าดู" : "WAIT"}</strong><small>${putReady ? "4/4 ตรง · quote ไม่เก่า" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+  }
+
+  function levelState() {
+    const bars = barsFor("M5");
+    const indicators = priceLevels.describe(bars);
+    const source = sourceFor("M5");
+    const last = bars.at(-1);
+    const fresh = Boolean(last && !source?.stale && marketOpenNow() && Date.now() - (last.time + 300) * 1000 <= 8 * 60_000);
+    const plan = fresh && state.planDirection !== "wait" ? priceLevels.calculate(bars, state.planDirection) : null;
+    return { indicators, plan, fresh, source };
+  }
+
+  function renderLevels() {
+    const { indicators, plan, fresh, source } = levelState();
+    const status = $("#level-status");
+    status.className = plan ? `level-ready ${plan.direction}` : "level-wait";
+    status.textContent = plan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
+      : !marketOpenNow() ? "WAIT · ตลาดปิด"
+      : source?.stale || !fresh ? "WAIT · รอแท่ง 5m ใหม่"
+      : state.planDirection === "wait" ? "WAIT · รอ 4/4 และ quote สด"
+      : "WAIT · โครงสร้างกว้างเกิน 3 ATR";
+    const cells = [
+      ["Forecast* +15m", fresh ? indicators?.projection : null, "forecast"],
+      ["EMA9 · 5m", indicators?.ema9, "ema-fast"],
+      ["EMA21 · 5m", indicators?.ema21, "ema-slow"],
+      [`Entry ${plan?.direction === "down" ? "PUT" : plan?.direction === "up" ? "CALL" : ""}`, plan?.entry, "entry"],
+      ["SL · จุดยกเลิก", plan?.stop, "stop"],
+      ["TP1 · 1R", plan?.tp1, "target"],
+      ["TP2 · 1.8R", plan?.tp2, "target"],
+      ["1R · ระยะเสี่ยง", plan?.risk, "risk"]
+    ];
+    $("#level-grid").innerHTML = cells.map(([label, value, tone]) => `<div class="level-cell ${tone}"><small>${esc(label)}</small><strong>${money(value)}</strong></div>`).join("");
+    $("#level-note").textContent = indicators
+      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ระดับเป็นราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
+      : "รอแท่ง 5m ให้พอคำนวณ · ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option";
   }
 
   function renderDataStatus() {
@@ -220,11 +251,32 @@
     volume.setData(bars.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "#27d98b66" : "#ff536366" })));
     chart.priceScale("volume").applyOptions({ visible: false, scaleMargins: { top: .83, bottom: 0 } });
     const closes = bars.map((bar) => bar.close);
-    [[9, "#d4af37"], [21, "#ded9cc"]].forEach(([period, color]) => {
+    const frameLabel = { M1: "1m", M5: "5m", M15: "15m", M60: "1h", M240: "4h", D: "1D" }[state.chartFrame];
+    [[9, "#4bd6eb"], [21, "#d4af37"]].forEach(([period, color]) => {
       const line = chart.addSeries(library.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       const values = ema(closes, period);
       line.setData(bars.map((bar, index) => ({ time: bar.time, value: values[index] })));
+      line.createPriceLine({ price: values.at(-1), color, lineWidth: 1, lineStyle: library.LineStyle?.Dotted ?? 1, axisLabelVisible: true, title: `EMA${period} ${frameLabel}` });
     });
+    if (!["M240", "D"].includes(state.chartFrame)) {
+      const { indicators, plan, fresh } = levelState();
+      const overlayPrices = [];
+      const addLevel = (price, title, color, lineStyle = library.LineStyle?.Dashed ?? 2) => {
+        candles.createPriceLine({ price, title, color, lineStyle, lineWidth: 1, axisLabelVisible: true });
+        overlayPrices.push(price);
+      };
+      if (fresh && indicators) addLevel(indicators.projection, "Forecast*", "#b58cff", library.LineStyle?.Dotted ?? 1);
+      if (plan) {
+        addLevel(plan.entry, "ENTRY", "#4bd6eb");
+        addLevel(plan.stop, "SL", "#ff5262");
+        addLevel(plan.tp1, "TP1", "#27db8c");
+        addLevel(plan.tp2, "TP2", "#18ac71");
+      }
+      if (overlayPrices.length) {
+        const scaleGuide = chart.addSeries(library.LineSeries, { color: "rgba(0, 0, 0, 0)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+        scaleGuide.setData([{ time: bars[0].time, value: Math.min(...overlayPrices) }, { time: bars.at(-1).time, value: Math.max(...overlayPrices) }]);
+      }
+    }
     chart.timeScale().fitContent();
     state.chart = chart;
     state.resizeObserver = new ResizeObserver(() => chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }));
@@ -292,10 +344,10 @@
     else if (spread > 10) warnings.push(`spread ${spread.toFixed(1)}% ค่อนข้างกว้าง`);
     if ((numeric(selected.volume) || 0) < 10) warnings.push("volume วันนี้ต่ำ");
     if ((numeric(selected.open_interest) || 0) < 100) warnings.push("OI ต่ำกว่า 100 สัญญา");
-    $("#decision-note").innerHTML = `<strong>เช็กก่อนเลือกสัญญา</strong><p>${warnings.length ? warnings.map(esc).join(" · ") : "bid/ask และสภาพคล่องเบื้องต้นอยู่ในช่วงที่อ่านค่าได้"}</p><p>ต้นทุนคำนวณจากราคา Ask × ${multiplier} · ยังไม่มีจุดเข้า / TP / SL ที่ผ่านการทดสอบ</p><small>Quote ณ ${bkkTime(selected.quote_time || chain(state.side)?.fetched_at)}</small>`;
+    $("#decision-note").innerHTML = `<strong>เช็กก่อนเลือกสัญญา</strong><p>${warnings.length ? warnings.map(esc).join(" · ") : "bid/ask และสภาพคล่องเบื้องต้นอยู่ในช่วงที่อ่านค่าได้"}</p><p>ต้นทุนคำนวณจากราคา Ask × ${multiplier} · แผน Entry / TP / SL ใต้กราฟเป็นราคาหุ้น ไม่ใช่ option premium และยังไม่ผ่านการทดสอบย้อนหลัง</p><small>Quote ณ ${bkkTime(selected.quote_time || chain(state.side)?.fetched_at)}</small>`;
   }
 
-  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderChart(); renderOi(); renderContract(); }
+  function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderChart(); renderLevels(); renderOi(); renderContract(); }
 
   async function edge(action, body) {
     const { data, error } = await state.db.functions.invoke("refresh-stock-prices", { body: { action, ...body } });
@@ -314,7 +366,7 @@
     const base = Math.floor(Date.now() / 1000 / step) * step - length * step;
     let last = seed;
     return Array.from({ length }, (_, index) => {
-      const move = Math.sin(index / 7) * .0038 + Math.cos(index / 15) * .0024 + (index > 155 ? .005 : .00028);
+      const move = Math.sin(index / 7) * .00045 + Math.cos(index / 15) * .00025 + (index > length - 100 ? .00025 : .00003);
       const open = last, close = open * (1 + move);
       last = close;
       return { time: new Date((base + index * step) * 1000).toISOString(), open, high: Math.max(open, close) * 1.003, low: Math.min(open, close) * .997, close, volume: 800000 + (index * 71431) % 1100000 };
@@ -457,6 +509,11 @@
   }
 
   async function init() {
+    if (!priceLevels?.calculate || !priceLevels?.describe) {
+      $("#auth-shell").hidden = false;
+      $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
+      return;
+    }
     if (demo) { await showDesk({ email: "preview@local" }); return; }
     if (!config?.supabaseUrl || !config?.supabasePublishableKey || !window.supabase?.createClient) {
       $("#auth-shell").hidden = false;
@@ -518,6 +575,10 @@
 
   async function maybeAutoRefresh() {
     renderDataStatus();
+    const previousPlanDirection = state.planDirection;
+    renderSignals();
+    renderLevels();
+    if (previousPlanDirection !== state.planDirection) renderChart();
     if (demo || !state.user || !state.symbol || state.busy || document.hidden || !marketOpenNow()) return;
     if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
     if (Date.now() - state.lastWatchlistReadAt >= 15 * 60_000) {
