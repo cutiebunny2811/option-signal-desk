@@ -100,6 +100,17 @@
     return loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
   }
 
+  function technicalTrend(bars) {
+    if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
+    const closes = bars.map((bar) => bar.close);
+    const fast = ema(closes, 9).at(-1), slow = ema(closes, 21).at(-1), last = closes.at(-1);
+    const strength = rsi(closes);
+    const rsiLabel = strength === null ? "RSI —" : `RSI ${Math.round(strength)}`;
+    if (strength !== null && last > fast && fast > slow && strength >= 50) return { direction: "up", label: "ขึ้น", detail: `${rsiLabel} · EMA ขึ้น`, usable: true };
+    if (strength !== null && last < fast && fast < slow && strength < 50) return { direction: "down", label: "ลง", detail: `${rsiLabel} · EMA ลง`, usable: true };
+    return { direction: "wait", label: "รอ", detail: `${rsiLabel} · ยังไม่ตรง`, usable: true };
+  }
+
   function trendFor(frame) {
     const bars = barsFor(frame);
     if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
@@ -111,13 +122,7 @@
     if (sourceFor(frame)?.stale || Date.now() - (bars.at(-1).time + duration * 60) * 1000 > maxLag * 60_000) {
       return { direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
     }
-    const closes = bars.map((bar) => bar.close);
-    const fast = ema(closes, 9).at(-1), slow = ema(closes, 21).at(-1), last = closes.at(-1);
-    const strength = rsi(closes);
-    const rsiLabel = strength === null ? "RSI —" : `RSI ${Math.round(strength)}`;
-    if (strength !== null && last > fast && fast > slow && strength >= 50) return { direction: "up", label: "ขึ้น", detail: `${rsiLabel} · EMA ขึ้น`, usable: true };
-    if (strength !== null && last < fast && fast < slow && strength < 50) return { direction: "down", label: "ลง", detail: `${rsiLabel} · EMA ลง`, usable: true };
-    return { direction: "wait", label: "รอ", detail: `${rsiLabel} · ยังไม่ตรง`, usable: true };
+    return technicalTrend(bars);
   }
 
   function renderWatchlist() {
@@ -180,19 +185,28 @@
     const source = sourceFor("M5");
     const last = bars.at(-1);
     const fresh = Boolean(last && !source?.stale && marketOpenNow() && Date.now() - (last.time + 300) * 1000 <= 8 * 60_000);
-    const plan = fresh && state.planDirection !== "wait" ? priceLevels.calculate(bars, state.planDirection) : null;
-    return { indicators, plan, fresh, source };
+    const recentHistory = Boolean(last && Date.now() - (last.time + 300) * 1000 < 4 * 24 * 60 * 60_000);
+    const five = technicalTrend(bars).direction;
+    const fifteen = technicalTrend(barsFor("M15")).direction;
+    const watchDirection = five === fifteen && five !== "wait" ? five : "wait";
+    const direction = state.planDirection !== "wait" ? state.planDirection : watchDirection;
+    const plan = recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null;
+    const livePlan = Boolean(plan && fresh && state.planDirection !== "wait");
+    return { indicators, plan, fresh, source, livePlan, recentHistory };
   }
 
   function renderLevels() {
-    const { indicators, plan, fresh, source } = levelState();
+    const { indicators, plan, fresh, source, livePlan, recentHistory } = levelState();
     const status = $("#level-status");
-    status.className = plan ? `level-ready ${plan.direction}` : "level-wait";
-    status.textContent = plan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
+    $(".level-panel").classList.toggle("preview", Boolean(plan && !livePlan));
+    status.className = livePlan ? `level-ready ${plan.direction}` : "level-wait";
+    status.textContent = livePlan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
+      : plan && !marketOpenNow() ? `WAIT · ตลาดปิด · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} จากรอบก่อน`
+      : plan ? `WAIT · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} ยังไม่คอนเฟิร์ม 4/4`
       : !marketOpenNow() ? "WAIT · ตลาดปิด"
+      : !recentHistory ? "WAIT · ไม่มีแท่งล่าสุดใน 4 วัน"
       : source?.stale || !fresh ? "WAIT · รอแท่ง 5m ใหม่"
-      : state.planDirection === "wait" ? "WAIT · รอ 4/4 และ quote สด"
-      : "WAIT · โครงสร้างกว้างเกิน 3 ATR";
+      : "WAIT · รอแนว 5m/15m ตรงกันหรือโครงสร้างเสี่ยงแคบลง";
     const cells = [
       ["Forecast* +15m", fresh ? indicators?.projection : null, "forecast"],
       ["EMA9 · 5m", indicators?.ema9, "ema-fast"],
@@ -205,7 +219,7 @@
     ];
     $("#level-grid").innerHTML = cells.map(([label, value, tone]) => `<div class="level-cell ${tone}"><small>${esc(label)}</small><strong>${money(value)}</strong></div>`).join("");
     $("#level-note").textContent = indicators
-      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ระดับเป็นราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
+      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ${livePlan ? "แผนเฝ้าดูสด" : "ระดับอ้างอิงย้อนหลัง ไม่ใช่สัญญาณสด"} · ราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
       : "รอแท่ง 5m ให้พอคำนวณ · ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option";
   }
 
@@ -259,7 +273,7 @@
       line.createPriceLine({ price: values.at(-1), color, lineWidth: 1, lineStyle: library.LineStyle?.Dotted ?? 1, axisLabelVisible: true, title: `EMA${period} ${frameLabel}` });
     });
     if (!["M240", "D"].includes(state.chartFrame)) {
-      const { indicators, plan, fresh } = levelState();
+      const { indicators, plan, fresh, livePlan } = levelState();
       const overlayPrices = [];
       const addLevel = (price, title, color, lineStyle = library.LineStyle?.Dashed ?? 2) => {
         candles.createPriceLine({ price, title, color, lineStyle, lineWidth: 1, axisLabelVisible: true });
@@ -267,10 +281,10 @@
       };
       if (fresh && indicators) addLevel(indicators.projection, "Forecast*", "#b58cff", library.LineStyle?.Dotted ?? 1);
       if (plan) {
-        addLevel(plan.entry, "ENTRY", "#4bd6eb");
-        addLevel(plan.stop, "SL", "#ff5262");
-        addLevel(plan.tp1, "TP1", "#27db8c");
-        addLevel(plan.tp2, "TP2", "#18ac71");
+        addLevel(plan.entry, "ENTRY", livePlan ? "#4bd6eb" : "#82949b");
+        addLevel(plan.stop, "SL", livePlan ? "#ff5262" : "#98747b");
+        addLevel(plan.tp1, "TP1", livePlan ? "#27db8c" : "#678f7a");
+        addLevel(plan.tp2, "TP2", livePlan ? "#18ac71" : "#5d806e");
       }
       if (overlayPrices.length) {
         const scaleGuide = chart.addSeries(library.LineSeries, { color: "rgba(0, 0, 0, 0)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });

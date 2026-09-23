@@ -7,7 +7,7 @@ Dashboard แยกสำหรับอ่านข้อมูลหุ้น�
 - เข้าเว็บด้วยบัญชี Supabase เดียวกับ PCC
 - เลือกหุ้นจาก Watchlist หรือพิมพ์ ticker
 - ดูทิศทาง 1m / 5m / 15m / 1h จาก EMA9, EMA21 และ RSI14, กราฟหุ้น, OI ของ Call/Put รอบราคา และรายละเอียดสัญญา
-- ดู Forecast* แบบต่อความชัน EMA9 ไป 15 นาที และระดับ Entry / SL / TP1 / TP2 ของราคาหุ้นเมื่อสัญญาณ 4/4 กับ option quote สดตรงกัน; กด “สูตรคำนวณระดับราคา” ใต้กราฟเพื่อดูที่มา
+- ดู Forecast* แบบต่อความชัน EMA9 ไป 15 นาที และระดับ Entry / SL / TP1 / TP2 ของราคาหุ้น; เมื่อแนว 5m/15m ตรงกันแต่ยังไม่มี 4/4 จะแสดงเป็นระดับอ้างอิงสีจาง/WAIT ส่วนแผนสดสีเด่นต้องมี 4/4 และ option quote สด; กด “สูตรคำนวณระดับราคา” ใต้กราฟเพื่อดูที่มา
 - กด OI ในแถว strike หรือเลือกรายการสัญญาเพื่อดู bid/ask, spread, Delta, IV, Volume/OI, ต้นทุนที่ Ask และจุดคุ้มทุน ณ หมดอายุ
 
 หน้าเว็บเรียก `refresh-stock-prices` Edge Function ที่ PCC มีอยู่แล้วด้วย JWT ของสมาชิก Webull key และ service role key อยู่ฝั่ง Supabase เท่านั้น สิทธิ์ OPRA ใน Edge Function จำกัดเฉพาะเจ้าของ subscription ตาม `OPTIONS_OPRA_OWNER_USER_ID` ของ PCC
