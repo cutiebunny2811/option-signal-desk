@@ -207,7 +207,7 @@
     $(".level-panel").classList.toggle("preview", Boolean(plan && !livePlan));
     status.className = livePlan ? `level-ready ${plan.direction}` : "level-wait";
     status.textContent = livePlan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
-      : plan?.wideRisk ? `WAIT · 1R กว้างกว่า 3 ATR (${money(plan.risk)})`
+      : plan?.wideRisk ? `WAIT · ${marketOpenNow() ? "" : "ตลาดปิด · "}1R กว้างกว่า 3 ATR (${money(plan.risk)})`
       : plan && !marketOpenNow() ? `WAIT · ตลาดปิด · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} จากรอบก่อน`
       : plan ? `WAIT · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} ยังไม่คอนเฟิร์ม 4/4`
       : !marketOpenNow() ? "WAIT · ตลาดปิด"
