@@ -63,13 +63,13 @@
       ? downCent(Math.min(lowFive - buffer, entry - .8 * volatility))
       : upCent(Math.max(highFive + buffer, entry + .8 * volatility));
     const risk = roundCent(Math.abs(entry - stop));
-    if (risk <= 0 || risk > 3 * volatility || stop <= 0) return null;
+    if (risk <= 0 || risk > 8 * volatility || stop <= 0) return null;
     const sign = direction === "up" ? 1 : -1;
     const tp1 = roundCent(entry + sign * risk);
     const tp2 = roundCent(entry + sign * risk * 1.8);
     if (Math.min(tp1, tp2) <= 0) return null;
     return {
-      direction, entry, stop, tp1, tp2, risk,
+      direction, entry, stop, tp1, tp2, risk, wideRisk: risk > 3 * volatility,
       ...indicators,
       breakoutBars: 10, swingBars: 5, bufferAtr: .1, minimumRiskAtr: .8,
       rr1: 1, rr2: 1.8

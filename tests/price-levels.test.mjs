@@ -46,3 +46,10 @@ test("missing, invalid or excessively wide setups fail closed", () => {
   const wide = bars(); wide[39].high += 20;
   assert.equal(levels.calculate(wide, "up"), null);
 });
+
+test("wide but measurable risk stays visible as an unconfirmed reference", () => {
+  const sample = bars(); sample[39].high += 5;
+  const plan = levels.calculate(sample, "up");
+  assert.ok(plan);
+  assert.equal(plan.wideRisk, true);
+});

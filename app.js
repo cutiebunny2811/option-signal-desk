@@ -20,7 +20,7 @@
     call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M1",
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {}, lastWatchlistReadAt: 0,
-    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait"
+    lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto"
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
@@ -189,24 +189,31 @@
     const five = technicalTrend(bars).direction;
     const fifteen = technicalTrend(barsFor("M15")).direction;
     const watchDirection = five === fifteen && five !== "wait" ? five : "wait";
-    const direction = state.planDirection !== "wait" ? state.planDirection : watchDirection;
+    const direction = state.levelSide === "call" ? "up" : state.levelSide === "put" ? "down"
+      : state.planDirection !== "wait" ? state.planDirection : watchDirection;
     const plan = recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null;
-    const livePlan = Boolean(plan && fresh && state.planDirection !== "wait");
+    const livePlan = Boolean(plan && !plan.wideRisk && fresh && state.planDirection === direction);
     return { indicators, plan, fresh, source, livePlan, recentHistory };
   }
 
   function renderLevels() {
     const { indicators, plan, fresh, source, livePlan, recentHistory } = levelState();
     const status = $("#level-status");
+    for (const button of $("#level-side").querySelectorAll("button")) {
+      const selected = button.dataset.levelSide === state.levelSide;
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    }
     $(".level-panel").classList.toggle("preview", Boolean(plan && !livePlan));
     status.className = livePlan ? `level-ready ${plan.direction}` : "level-wait";
     status.textContent = livePlan ? `เฝ้าดู ${plan.direction === "up" ? "CALL" : "PUT"} · 1R = ${money(plan.risk)}`
+      : plan?.wideRisk ? `WAIT · 1R กว้างกว่า 3 ATR (${money(plan.risk)})`
       : plan && !marketOpenNow() ? `WAIT · ตลาดปิด · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} จากรอบก่อน`
       : plan ? `WAIT · ระดับ${plan.direction === "up" ? "CALL" : "PUT"} ยังไม่คอนเฟิร์ม 4/4`
       : !marketOpenNow() ? "WAIT · ตลาดปิด"
       : !recentHistory ? "WAIT · ไม่มีแท่งล่าสุดใน 4 วัน"
       : source?.stale || !fresh ? "WAIT · รอแท่ง 5m ใหม่"
-      : "WAIT · รอแนว 5m/15m ตรงกันหรือโครงสร้างเสี่ยงแคบลง";
+      : "WAIT · เลือก CALL/PUT เพื่อดูระดับจำลอง";
     const cells = [
       ["Forecast* +15m", fresh ? indicators?.projection : null, "forecast"],
       ["EMA9 · 5m", indicators?.ema9, "ema-fast"],
@@ -463,7 +470,7 @@
     state.symbol = normalized;
     state.busy = true;
     state.lastError = "";
-    if (symbolChanged) { state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; }
+    if (symbolChanged) { state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; state.levelSide = "auto"; }
     if (!background) setStatus("กำลังอ่านราคา กราฟ และ option chain…");
     renderAll();
     try {
@@ -573,6 +580,13 @@
     renderChart();
     const sourceFrame = ["M5", "M15"].includes(state.chartFrame) ? "M1" : state.chartFrame;
     if (!state.charts[sourceFrame] && !state.busy) void loadSymbol(state.symbol, { options: false, chartFrames: [sourceFrame] });
+  });
+  $("#level-side").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-level-side]");
+    if (!button) return;
+    state.levelSide = button.dataset.levelSide;
+    renderLevels();
+    renderChart();
   });
   $("#expiry-select").addEventListener("change", (event) => loadSymbol(state.symbol, { expiry: event.target.value }));
   $("#option-side").addEventListener("click", (event) => { const button = event.target.closest("[data-side]"); if (button) { state.side = button.dataset.side; state.contractSymbol = ""; renderContract(); } });
