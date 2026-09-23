@@ -49,3 +49,11 @@ body,.main-panel{background:var(--bg)}.topbar,.watch-panel,.contract-panel{backg
 .workflow-meta b{display:block;overflow-wrap:anywhere;color:var(--text);font:.7rem/1.4 var(--mono);margin-top:2px}
 .plan-workflow>small{display:block;margin-top:10px;color:var(--muted);font-size:.72rem;line-height:1.5}
 @media(max-width:760px){.workflow-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.workflow-meta span:nth-child(2){border-right:0}.workflow-meta span:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+
+/* MTF cards expose the as-of candle rather than implying four simultaneous last prices. */
+.signal-card{min-height:128px}.signal-primary{display:flex;align-items:baseline;justify-content:space-between;gap:5px 10px;flex-wrap:wrap}
+.signal-primary b{font:700 1.03rem/1.2 var(--mono);color:var(--text);white-space:nowrap}
+.signal-card time,.signal-card .signal-time{display:block;margin:5px 0 4px;color:var(--muted);font-size:.7rem;line-height:1.35}
+.tf-reading-note{margin:8px 0 0;padding:7px 10px;border-left:2px solid var(--gold);color:var(--muted);font-size:.75rem;line-height:1.45}
+.chart-footer{align-items:flex-start;flex-wrap:wrap}.chart-footer span:last-child{text-align:right}
+@media(max-width:760px){.signal-card{min-height:122px}.signal-primary b{font-size:.96rem}.chart-footer span:last-child{text-align:left}}

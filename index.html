@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -53,6 +53,7 @@
         <section class="signal-strip" aria-labelledby="signal-title">
           <div class="section-head"><div><span class="index">03 / MULTI-TIMEFRAME</span><h2 id="signal-title">เช็กทิศทาง 4 ช่วงเวลา</h2></div><span class="section-aside">แท่งปิด · EMA9 / EMA21 + RSI14</span></div>
           <div class="signal-grid" id="signal-grid"></div>
+          <p class="tf-reading-note">แต่ละช่อง = ราคาปิดแท่งล่าสุดที่ปิดครบ · เวลาปิดต่างกันได้ · EMA/RSI คำนวณแยก TF · เวลาไทย</p>
           <div class="signal-verdict" id="signal-verdict"></div>
           <div class="option-signal" id="option-signal"></div>
           <p class="fine-print">4/4 หมายถึงทิศทางราคาหุ้นตรงกัน ไม่ใช่ความน่าจะเป็นชนะหรือสัญญาณให้กดซื้อ · ข้อมูลเก่า/ตลาดปิด = WAIT</p>
@@ -61,7 +62,7 @@
         <section class="chart-section" aria-labelledby="chart-title">
           <div class="section-head"><div><span class="index">04 / PRICE CHART</span><h2 id="chart-title">กราฟหุ้นอ้างอิง</h2></div><div class="segmented" id="chart-frames" role="group" aria-label="เลือกช่วงเวลากราฟ"><button type="button" data-frame="M1" class="active">1m</button><button type="button" data-frame="M5">5m</button><button type="button" data-frame="M15">15m</button><button type="button" data-frame="M60">1h</button><button type="button" data-frame="M240">4h</button><button type="button" data-frame="D">1D</button></div></div>
           <div id="price-chart" class="price-chart" role="img" aria-label="กราฟแท่งเทียนของหุ้นอ้างอิง"></div>
-          <div class="chart-footer"><span>แท่งเทียน + EMA9 / EMA21 · ระดับแผนจากกราฟ 5m</span><span id="chart-freshness">—</span></div>
+          <div class="chart-footer"><span id="chart-bar-meta">แท่งเทียน + EMA9 / EMA21 · เวลาไทย</span><span id="chart-freshness">—</span></div>
           <div class="level-panel" aria-label="ระดับราคาและแผนเงื่อนไข">
             <div class="level-heading"><strong>ระดับที่เฝ้าดู</strong><div class="level-header-right"><div class="level-side" id="level-side" role="group" aria-label="เลือกฝั่งเพื่อดูระดับจำลอง"><button type="button" data-level-side="auto" aria-pressed="true">ตามสัญญาณ</button><button type="button" data-level-side="call" aria-pressed="false">CALL</button><button type="button" data-level-side="put" aria-pressed="false">PUT</button></div><span id="level-status">กำลังอ่านแท่งราคา</span></div></div>
             <div class="plan-workflow waiting" id="plan-workflow"></div>
@@ -107,6 +108,7 @@
   <script src="config.js"></script>
   <script src="price-levels.js?v=2"></script>
   <script src="trade-plan.js?v=1"></script>
-  <script src="app.js?v=12"></script>
+  <script src="chart-time.js?v=1"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

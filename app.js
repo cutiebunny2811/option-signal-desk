@@ -4,6 +4,7 @@
   const config = window.__OPTION_DESK_CONFIG__;
   const priceLevels = window.OptionDeskLevels;
   const tradePlan = window.OptionDeskTradePlan;
+  const chartTime = window.OptionDeskChartTime;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -59,14 +60,13 @@
     return [...seen.values()].sort((a, b) => a.time - b.time);
   }
 
-  function closedBars(input, minutes) {
-    const cutoff = Date.now() / 1000 - 3;
-    return normalizeBars(input).filter((bar) => bar.time + minutes * 60 <= cutoff);
+  function closedBars(input, frame, source) {
+    return chartTime.completedBars(normalizeBars(input), frame, source?.fetched_at);
   }
 
   function aggregateBars(input, minutes) {
     const groups = new Map();
-    for (const bar of closedBars(input, 1)) {
+    for (const bar of closedBars(input, "M1", state.charts.M1)) {
       const bucket = Math.floor(bar.time / (minutes * 60)) * minutes * 60;
       if (!groups.has(bucket)) groups.set(bucket, []);
       groups.get(bucket).push(bar);
@@ -81,7 +81,7 @@
   function barsFor(frame) {
     if (frame === "M5") return aggregateBars(state.charts.M1?.bars, 5);
     if (frame === "M15") return aggregateBars(state.charts.M1?.bars, 15);
-    return closedBars(state.charts[frame]?.bars, frame === "M60" ? 60 : 1);
+    return closedBars(state.charts[frame]?.bars, frame, state.charts[frame]);
   }
 
   function sourceFor(frame) { return state.charts[["M5", "M15"].includes(frame) ? "M1" : frame]; }
@@ -115,16 +115,17 @@
 
   function trendFor(frame) {
     const bars = barsFor(frame);
-    if (bars.length < 25) return { direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
-    if (!marketOpenNow()) return { direction: "wait", label: "ตลาดปิด", detail: "ไม่คอนเฟิร์มนอกเวลาตลาด", closed: true };
-    const duration = { M1: 1, M5: 5, M15: 15, M60: 60 }[frame] || 60;
+    const lastBar = bars.at(-1), closeTime = chartTime.barEndMs(lastBar, frame);
+    const reference = { lastBar, closeTime };
+    if (bars.length < 25) return { ...reference, direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
+    if (!marketOpenNow()) return { ...reference, direction: "wait", label: "ตลาดปิด", detail: "ไม่คอนเฟิร์มนอกเวลาตลาด", closed: true };
     // A completed higher-timeframe candle stays valid until its successor closes.
     // Give each frame one full candle plus a small provider/cache arrival margin.
     const maxLag = { M1: 4, M5: 8, M15: 18, M60: 65 }[frame] || 65;
-    if (sourceFor(frame)?.stale || Date.now() - (bars.at(-1).time + duration * 60) * 1000 > maxLag * 60_000) {
-      return { direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
+    if (sourceFor(frame)?.stale || Date.now() - closeTime > maxLag * 60_000) {
+      return { ...reference, direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
     }
-    return technicalTrend(bars);
+    return { ...reference, ...technicalTrend(bars) };
   }
 
   function renderWatchlist() {
@@ -144,7 +145,7 @@
     $("#spot-price").textContent = money(price);
     $("#spot-change").textContent = signedPercent(change);
     $("#spot-change").className = `ticker-change ${numeric(change) === null ? "" : Number(change) >= 0 ? "positive" : "negative"}`;
-    $("#spot-time").textContent = underlying ? `ราคาหุ้น ณ ${bkkTime(underlying.market_time)} · ข้อมูล option ณ ${bkkTime(state.call?.fetched_at || state.put?.fetched_at)}` : state.busy ? "กำลังโหลดข้อมูล" : "เลือกหุ้นเพื่อดูข้อมูล";
+    $("#spot-time").textContent = underlying ? `ราคา quote หุ้น ณ ${bkkTime(underlying.market_time)} · ข้อมูล Option ณ ${bkkTime(state.call?.fetched_at || state.put?.fetched_at)} · เวลาไทย` : state.busy ? "กำลังโหลดข้อมูล" : "เลือกหุ้นเพื่อดูข้อมูล";
     $("#symbol-input").value = state.symbol;
     $("#refresh-button").disabled = state.busy || !state.symbol;
     const badge = $("#source-pill");
@@ -157,7 +158,7 @@
   function renderSignals() {
     const frames = [["M1", "1m"], ["M5", "5m"], ["M15", "15m"], ["M60", "1h"]];
     const trends = frames.map(([frame, label]) => ({ ...trendFor(frame), frame, frameLabel: label }));
-    $("#signal-grid").innerHTML = trends.map((trend) => `<div class="signal-card"><small>${trend.frameLabel}</small><strong class="${trend.direction}">${trend.label}</strong><span>${esc(trend.detail)}</span></div>`).join("");
+    $("#signal-grid").innerHTML = trends.map((trend) => `<div class="signal-card"><small>${trend.frameLabel} · แท่งปิด</small><div class="signal-primary"><strong class="${trend.direction}">${trend.label}</strong><b>${money(trend.lastBar?.close)}</b></div>${trend.closeTime ? `<time datetime="${new Date(trend.closeTime).toISOString()}">ปิด ${chartTime.formatBangkok(trend.closeTime / 1000)}</time>` : `<span class="signal-time">รอแท่งปิด</span>`}<span>${esc(trend.detail)}</span></div>`).join("");
     const up = trends.filter((trend) => trend.direction === "up").length;
     const down = trends.filter((trend) => trend.direction === "down").length;
     const loaded = trends.filter((trend) => trend.usable).length;
@@ -339,6 +340,10 @@
     const data = sourceFor(state.chartFrame);
     const bars = barsFor(state.chartFrame);
     $("#chart-freshness").textContent = data?.fetched_at ? `${data.stale ? "แคชเก่า" : data.cached ? "จากแคช" : "อัปเดต"} · ${bkkTime(data.fetched_at)}` : "ยังไม่มีข้อมูล";
+    const lastBar = bars.at(-1), closedAt = chartTime.barEndMs(lastBar, state.chartFrame);
+    $("#chart-bar-meta").textContent = lastBar
+      ? `ปิดแท่ง ${money(lastBar.close)} · ${state.chartFrame === "D" ? `วันตลาด ${chartTime.formatSessionDate(lastBar.time)}` : `${chartTime.formatBangkok(closedAt / 1000)} เวลาไทย`} · แผน Entry อิง 5m`
+      : "ยังไม่มีแท่งที่ปิดครบ · เวลาใต้กราฟเป็นเวลาไทย";
     for (const button of $("#chart-frames").querySelectorAll("button")) button.classList.toggle("active", button.dataset.frame === state.chartFrame);
     if (!bars.length) { container.innerHTML = `<div class="chart-empty">${state.busy ? "กำลังเปิดกราฟ…" : "ยังไม่มีกราฟสำหรับหุ้นนี้"}</div>`; return; }
     const library = window.LightweightCharts;
@@ -346,7 +351,9 @@
     const chart = library.createChart(container, {
       width: container.clientWidth, height: container.clientHeight, layout: { background: { color: "#030405" }, textColor: "#b5bac0", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 },
       grid: { vertLines: { color: "#1a1e21" }, horzLines: { color: "#1a1e21" } },
-      rightPriceScale: { borderColor: "#34383d" }, timeScale: { borderColor: "#34383d", timeVisible: state.chartFrame !== "D" },
+      rightPriceScale: { borderColor: "#34383d" },
+      timeScale: { borderColor: "#34383d", timeVisible: state.chartFrame !== "D", tickMarkFormatter: (time, type) => chartTime.axisTick(time, type, state.chartFrame === "D") },
+      localization: { locale: "th-TH", timeFormatter: (time) => state.chartFrame === "D" ? chartTime.formatSessionDate(time) : chartTime.formatBangkok(time) },
       crosshair: { vertLine: { color: "#d4af3777" }, horzLine: { color: "#d4af3777" } },
       handleScroll: { horzTouchDrag: true, vertTouchDrag: false }
     });
@@ -514,8 +521,8 @@
     }
     if (!instrumentId) return null;
     const cached = await edge("chart", { instrument_id: instrumentId, timespan: frame });
-    const latestClosedHour = frame === "M60" ? closedBars(cached?.bars, 60).at(-1) : null;
-    const hourNeedsRefresh = frame === "M60" && marketOpenNow() && (!latestClosedHour || Date.now() - (latestClosedHour.time + 3600) * 1000 > 65 * 60_000);
+    const latestClosedHour = frame === "M60" ? closedBars(cached?.bars, "M60", cached).at(-1) : null;
+    const hourNeedsRefresh = frame === "M60" && marketOpenNow() && (!latestClosedHour || Date.now() - chartTime.barEndMs(latestClosedHour, "M60") > 65 * 60_000);
     if (!cached?.stale && !hourNeedsRefresh) return cached;
     try { return await edge("chart", { instrument_id: instrumentId, timespan: frame, refresh: true }); }
     catch (error) { return { ...cached, stale: true, refresh_error: error.message }; }
@@ -629,7 +636,7 @@
   }
 
   async function init() {
-    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile) {
+    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
       return;
