@@ -286,7 +286,14 @@
         candles.createPriceLine({ price, title, color, lineStyle, lineWidth: 1, axisLabelVisible: true });
         overlayPrices.push(price);
       };
-      if (fresh && indicators) addLevel(indicators.projection, "Forecast*", "#b58cff", library.LineStyle?.Dotted ?? 1);
+      if (fresh && indicators) {
+        addLevel(indicators.projection, "Forecast*", "#b58cff", library.LineStyle?.Dotted ?? 1);
+        if (["M1", "M5", "M15"].includes(state.chartFrame)) {
+          const startTime = Math.max(bars.at(-1).time, indicators.basedOn + 300);
+          const projectionLine = chart.addSeries(library.LineSeries, { color: "#b58cff", lineStyle: library.LineStyle?.Dotted ?? 1, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          projectionLine.setData([{ time: startTime, value: indicators.ema9 }, { time: startTime + 900, value: indicators.projection }]);
+        }
+      }
       if (plan) {
         addLevel(plan.entry, "ENTRY", livePlan ? "#4bd6eb" : "#82949b");
         addLevel(plan.stop, "SL", livePlan ? "#ff5262" : "#98747b");
@@ -298,7 +305,10 @@
         scaleGuide.setData([{ time: bars[0].time, value: Math.min(...overlayPrices) }, { time: bars.at(-1).time, value: Math.max(...overlayPrices) }]);
       }
     }
-    chart.timeScale().fitContent();
+    const lookback = { M1: 180, M5: 100, M15: 80, M60: 80 }[state.chartFrame];
+    const future = { M1: 18, M5: 4, M15: 2, M60: 1 }[state.chartFrame];
+    if (lookback) chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - lookback), to: bars.length + future });
+    else chart.timeScale().fitContent();
     state.chart = chart;
     state.resizeObserver = new ResizeObserver(() => chart.applyOptions({ width: container.clientWidth, height: container.clientHeight }));
     state.resizeObserver.observe(container);
