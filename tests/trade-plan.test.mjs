@@ -6,11 +6,18 @@ const NOW = Date.UTC(2026, 8, 23, 14);
 const contract = (changes = {}) => ({ symbol: "ONDS-C10", bid: .95, ask: 1.03, volume: 40, open_interest: 500, quote_time: new Date(NOW).toISOString(), ...changes });
 const candidate = (changes = {}) => ({ direction: "up", entry: 10, stop: 9.8, tp1: 10.2, tp2: 10.36, risk: .2, basedOn: 900, wideRisk: false, ...changes });
 const bar = (time, open, high, low, close) => ({ time, open, high, low, close });
-const context = (changes = {}) => ({
-  symbol: "ONDS", sessionKey: "2026-09-23", candidate: candidate(), confirmed: true,
-  marketOpen: true, chartFresh: true, contract: contract(),
-  bars: [bar(1000, 9.9, 9.95, 9.88, 9.92)], now: NOW, ...changes
-});
+const context = (changes = {}) => {
+  const input = {
+    symbol: "ONDS", sessionKey: "2026-09-23", candidate: candidate(), confirmed: true,
+    marketOpen: true, chartFresh: true, contract: contract(),
+    bars: [bar(1000, 9.9, 9.95, 9.88, 9.92)], now: NOW, ...changes
+  };
+  if (!("vwap" in changes)) input.vwap = {
+    ready: true,
+    byTime: Object.fromEntries(input.bars.map((item) => [item.time, item.close + (input.candidate.direction === "up" ? -.05 : .05)]))
+  };
+  return input;
+};
 
 test("locks a setup and ignores historical touches before arming", () => {
   const prior = bar(940, 9.9, 10.1, 9.85, 9.91);
@@ -32,6 +39,7 @@ test("only a new, completed one-minute close through entry triggers; levels stay
   assert.equal(fired.status, "triggered");
   assert.equal(fired.entry, 10);
   assert.equal(fired.triggerClose, 10.02);
+  assert.ok(Math.abs(fired.vwapAtTrigger - 9.97) < 1e-9);
 });
 
 test("fails closed on gap, ambiguous candle, stale quote, and missing candles", () => {
@@ -87,4 +95,31 @@ test("put setup confirms only on a fresh close below the locked level", () => {
   const triggered = tracker.reconcile(armed, context({ candidate: put, bars: [first, second] })).plan;
   assert.equal(triggered.status, "triggered");
   assert.equal(triggered.direction, "down");
+});
+
+test("VWAP filters arming and the actual trigger without moving locked levels", () => {
+  const first = context().bars[0];
+  const blocked = tracker.reconcile(null, context({ vwap: { ready: true, byTime: { [first.time]: 10 } } }));
+  assert.equal(blocked.plan, null);
+  assert.match(blocked.block, /VWAP/);
+  assert.equal(tracker.reconcile(null, context({ vwap: { ready: false, reason: "แท่ง 1m วันนี้ขาดช่วง", byTime: {} } })).plan, null);
+
+  const armed = tracker.reconcile(null, context()).plan;
+  const crossing = bar(1060, 9.92, 10.04, 9.90, 10.02);
+  const denied = tracker.reconcile(armed, context({
+    bars: [first, crossing],
+    vwap: { ready: true, byTime: { [first.time]: 9.87, [crossing.time]: 10.03 } }
+  })).plan;
+  assert.equal(denied.status, "missed");
+  assert.match(denied.reason, /VWAP/);
+  assert.equal(denied.entry, armed.entry);
+  assert.equal(denied.stop, armed.stop);
+  assert.equal(denied.tp1, armed.tp1);
+});
+
+test("missing VWAP after arming stops confirmation instead of guessing", () => {
+  const armed = tracker.reconcile(null, context()).plan;
+  const result = tracker.reconcile(armed, context({ vwap: { ready: false, reason: "volume ไม่ครบ", byTime: {} } })).plan;
+  assert.equal(result.status, "data_gap");
+  assert.match(result.reason, /VWAP/);
 });

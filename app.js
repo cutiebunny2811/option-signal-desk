@@ -6,6 +6,7 @@
   const tradePlan = window.OptionDeskTradePlan;
   const chartTime = window.OptionDeskChartTime;
   const focusList = window.OptionDeskFocus;
+  const sessionVwap = window.OptionDeskSessionVwap;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -25,7 +26,7 @@
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {},
     lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto",
-    tradePlan: null, optionGate: null, planBlock: ""
+    tradePlan: null, optionGate: null, vwapGate: null, planBlock: ""
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
@@ -305,15 +306,21 @@
     const direction = state.planDirection !== "wait" ? state.planDirection : state.tradePlan?.direction || "wait";
     const candidate = direction !== "wait" ? priceLevels.calculate(bars, direction) : null;
     const now = Date.now();
+    const sessionKey = tradingDate(now);
+    const vwap = sessionVwap.calculate(minuteBars, sessionKey);
     const chartFresh = Boolean(lastFive && lastMinute && !source?.stale
       && now - (lastFive.time + 300) * 1000 <= 8 * 60_000
       && now - (lastMinute.time + 60) * 1000 <= 4 * 60_000);
+    const marketOpen = marketOpenNow();
+    state.vwapGate = marketOpen && chartFresh
+      ? { ...sessionVwap.check(vwap, direction, lastMinute), ready: vwap.ready }
+      : { ok: false, ready: false, value: null, reason: marketOpen ? "รอกราฟสด" : "ตลาดปิด" };
     const previousPlan = state.tradePlan;
     const result = tradePlan.reconcile(previousPlan, {
-      symbol: state.symbol, sessionKey: tradingDate(now), candidate,
+      symbol: state.symbol, sessionKey, candidate,
       confirmed: state.planDirection === direction && direction !== "wait" && !candidate?.wideRisk,
-      marketOpen: marketOpenNow(), chartFresh,
-      contract: selectedTradeContract(direction), bars: minuteBars, now
+      marketOpen, chartFresh,
+      contract: selectedTradeContract(direction), bars: minuteBars, vwap, now
     });
     state.tradePlan = result.plan;
     state.optionGate = result.option;
@@ -323,7 +330,7 @@
       const plan = result.plan;
       const quote = plan.detectedQuote;
       const messages = {
-        triggered: [`${state.symbol} · Entry ผ่าน`, `หุ้นปิดผ่าน ${money(plan.entry)} · ${plan.contractSymbol} bid/ask ${money(quote?.bid)} / ${money(quote?.ask)} ณ ${quote?.quoteAt ? bkkTime(quote.quoteAt) : "ไม่ทราบเวลา"} · ตรวจ broker ก่อนตัดสินใจ`],
+        triggered: [`${state.symbol} · Entry ผ่าน`, `หุ้นปิดผ่าน ${money(plan.entry)} และ VWAP ${money(plan.vwapAtTrigger)} · ${plan.contractSymbol} bid/ask ${money(quote?.bid)} / ${money(quote?.ask)} ณ ${quote?.quoteAt ? bkkTime(quote.quoteAt) : "ไม่ทราบเวลา"} · ตรวจ broker ก่อนตัดสินใจ`],
         tp1: [`${state.symbol} · หุ้นแตะ TP1`, `ราคาหุ้นแตะ ${money(plan.tp1)} · ตรวจสถานะสัญญาจริง`],
         tp2: [`${state.symbol} · หุ้นแตะ TP2`, `ราคาหุ้นแตะ ${money(plan.tp2)} · ตรวจสถานะสัญญาจริง`],
         stopped: [`${state.symbol} · หุ้นแตะ SL`, `ราคาหุ้นแตะ ${money(plan.stop)} · ไม่ใช่คำสั่งขายออปชัน`],
@@ -364,18 +371,21 @@
     else if (tracked?.status === "armed") {
       const close = lastMinute?.close;
       const distance = close === undefined ? null : Math.abs(tracked.entry - close);
-      detail = `รอแท่ง 1m ปิด${tracked.direction === "up" ? "เหนือ" : "ต่ำกว่า"} ${money(tracked.entry)} · ล่าสุด ${money(close)} · ห่าง ${money(distance)} · หมดอายุ ${bkkTime(tracked.expiresAt)}`;
+      detail = `รอแท่ง 1m ปิด${tracked.direction === "up" ? "เหนือ" : "ต่ำกว่า"} ${money(tracked.entry)} · ล่าสุด ${money(close)} · ห่าง ${money(distance)}${state.vwapGate?.ok ? "" : " · VWAP ยังไม่ยืนยัน"} · หมดอายุ ${bkkTime(tracked.expiresAt)}`;
     } else if (tracked?.status === "triggered" || tracked?.status === "tp1") {
       const quote = tracked.detectedQuote;
-      detail = `แท่ง 1m ปิดผ่าน ${money(tracked.entry)} ณ ${bkkTime(tracked.triggeredAt || tracked.statusAt)} · ${tracked.status === "tp1" ? "แตะ TP1 แล้ว · " : ""}${quote ? `Option bid/ask ตอนตรวจพบ ${money(quote.bid)} / ${money(quote.ask)} (quote ${bkkTime(quote.quoteAt)}) · ` : ""}ตรวจราคาใน broker ก่อนตัดสินใจ`;
+      detail = `แท่ง 1m ปิดผ่าน ${money(tracked.entry)} และ VWAP ${money(tracked.vwapAtTrigger)} ณ ${bkkTime(tracked.triggeredAt || tracked.statusAt)} · ${tracked.status === "tp1" ? "แตะ TP1 แล้ว · " : ""}${quote ? `Option bid/ask ตอนตรวจพบ ${money(quote.bid)} / ${money(quote.ask)} (quote ${bkkTime(quote.quoteAt)}) · ` : ""}ตรวจราคาใน broker ก่อนตัดสินใจ`;
     } else if (tracked) detail = `${tracked.reason || "แผนสิ้นสุด"} · ${bkkTime(tracked.statusAt)}`;
     else if (!marketOpenNow()) detail = "ตลาดปิด · ไม่สร้างสัญญาณเข้าใหม่";
     else if (state.planDirection === "wait") detail = "รอ 1m / 5m / 15m / 1h ตรงกัน 4/4 และข้อมูลสด";
     else if (state.optionGate && !state.optionGate.ok) detail = `เลือกสัญญา${state.planDirection === "up" ? " CALL" : " PUT"} ที่ผ่านเกณฑ์ · ${state.optionGate.reasons.join(" · ")}`;
     else detail = state.planBlock || "รอข้อมูลกราฟ 1m / 5m ที่ปิดครบและสด";
     const contractName = (manual ? state.tradePlan : tracked)?.contractSymbol || state.optionGate?.symbol || "ยังไม่พร้อม";
+    const vwapValue = tracked?.vwapAtTrigger ?? state.vwapGate?.value;
+    const vwapLabel = Number.isFinite(tracked?.vwapAtTrigger) ? `ผ่านตอนเข้า · ${money(vwapValue)}`
+      : state.vwapGate?.ready ? `${state.vwapGate.ok ? "ผ่าน" : "รอ"} · ${money(vwapValue)}` : "รอข้อมูล";
     box.className = `plan-workflow ${!manual && active ? tone : "waiting"}`;
-    box.innerHTML = `<div class="workflow-heading"><span class="index">ENTRY WORKFLOW / ราคาหุ้น</span><strong>${esc(title)}</strong></div><p>${esc(detail)}</p><div class="workflow-meta"><span>สัญญา <b>${esc(contractName)}</b></span><span>4/4 <b>${state.planDirection !== "wait" ? "ผ่าน" : "รอ"}</b></span><span>Quote / spread <b>${state.optionGate?.ok ? "ผ่านเกณฑ์" : "รอ/ไม่ผ่าน"}</b></span><span>สถานะ <b>${manual ? "ดูจำลอง" : tracked ? active ? "ล็อกระดับ" : "สิ้นสุด" : "ยังไม่ล็อก"}</b></span></div><small>จุดเข้า/SL/TP คือราคาหุ้น ไม่ใช่ราคา Option หรือคำสั่งซื้อ · สัญญาณตรวจจากแท่งปิด อาจช้ากว่าตลาดจริง</small>`;
+    box.innerHTML = `<div class="workflow-heading"><span class="index">ENTRY WORKFLOW / ราคาหุ้น</span><strong>${esc(title)}</strong></div><p>${esc(detail)}</p><div class="workflow-meta"><span>สัญญา <b>${esc(contractName)}</b></span><span>4/4 <b>${state.planDirection !== "wait" ? "ผ่าน" : "รอ"}</b></span><span>Quote / spread <b>${state.optionGate?.ok ? "ผ่านเกณฑ์" : "รอ/ไม่ผ่าน"}</b></span><span>VWAP วัน <b>${esc(vwapLabel)}</b></span><span>สถานะ <b>${manual ? "ดูจำลอง" : tracked ? active ? "ล็อกระดับ" : "สิ้นสุด" : "ยังไม่ล็อก"}</b></span></div><small>VWAP กรองจุดเข้าเท่านั้น ไม่ขยับ Entry/SL/TP · ระดับทั้งหมดคือราคาหุ้น ไม่ใช่ราคา Option หรือคำสั่งซื้อ</small>`;
   }
 
   function renderLevels() {
@@ -696,7 +706,7 @@
     state.busy = true;
     state.lastError = "";
     if (symbolChanged) {
-      state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; state.levelSide = "auto";
+      state.call = null; state.put = null; state.expiry = ""; state.contractSymbol = ""; state.charts = {}; state.levelSide = "auto"; state.vwapGate = null;
       state.tradePlan = readStoredPlan();
       state.side = state.tradePlan?.direction === "down" ? "put" : "call";
       state.contractSymbol = state.tradePlan?.contractSymbol || "";
@@ -740,7 +750,7 @@
   async function showDesk(user) {
     if (state.user?.id !== user?.id) {
       state.focusSignals = {}; state.focusInstrumentIds = {}; state.symbol = ""; state.instrumentId = null;
-      state.call = null; state.put = null; state.charts = {}; state.tradePlan = null;
+      state.call = null; state.put = null; state.charts = {}; state.tradePlan = null; state.vwapGate = null;
     }
     state.user = user;
     $("#auth-shell").hidden = true;
@@ -763,14 +773,14 @@
     state.requestId++;
     state.user = null;
     state.focusSymbols = []; state.focusAssetTypes = {}; state.focusSignals = {}; state.alerts = []; state.focusInstrumentIds = {};
-    state.symbol = ""; state.instrumentId = null; state.call = null; state.put = null; state.charts = {}; state.tradePlan = null;
+    state.symbol = ""; state.instrumentId = null; state.call = null; state.put = null; state.charts = {}; state.tradePlan = null; state.vwapGate = null;
     clearChart();
     $("#app-shell").hidden = true;
     $("#auth-shell").hidden = false;
   }
 
   async function init() {
-    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars || !focusList?.cleanSymbols) {
+    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars || !focusList?.cleanSymbols || !sessionVwap?.calculate) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
       return;

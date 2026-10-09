@@ -43,12 +43,12 @@ body,.main-panel{background:var(--bg)}.topbar,.watch-panel,.contract-panel{backg
 .plan-workflow.up .workflow-heading strong{color:var(--green)}
 .plan-workflow.down .workflow-heading strong{color:var(--ruby-hi)}
 .plan-workflow p{margin:8px 0 12px;color:var(--text);font-size:.87rem;line-height:1.5}
-.workflow-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.workflow-meta{display:grid;grid-template-columns:minmax(0,2fr) repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .workflow-meta span{min-width:0;padding:8px 9px;color:var(--muted);font-size:.72rem;border-right:1px solid var(--line)}
 .workflow-meta span:last-child{border-right:0}
 .workflow-meta b{display:block;overflow-wrap:anywhere;color:var(--text);font:.7rem/1.4 var(--mono);margin-top:2px}
 .plan-workflow>small{display:block;margin-top:10px;color:var(--muted);font-size:.72rem;line-height:1.5}
-@media(max-width:760px){.workflow-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.workflow-meta span:nth-child(2){border-right:0}.workflow-meta span:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+@media(max-width:760px){.workflow-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.workflow-meta span:nth-child(2n){border-right:0}.workflow-meta span:nth-child(-n+4){border-bottom:1px solid var(--line)}.workflow-meta span:last-child{grid-column:1/-1}}
 
 /* MTF cards expose the as-of candle rather than implying four simultaneous last prices. */
 .signal-card{min-height:128px}.signal-primary{display:flex;align-items:baseline;justify-content:space-between;gap:5px 10px;flex-wrap:wrap}

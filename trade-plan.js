@@ -32,10 +32,14 @@
   function beyond(price, level, direction) { return direction === "up" ? price >= level : price <= level; }
   function crossed(bar, level, direction) { return direction === "up" ? bar.high >= level && bar.close >= level : bar.low <= level && bar.close <= level; }
   function gapPast(bar, level, direction) { return beyond(bar.open, level, direction); }
+  function vwapAt(vwap, bar) { return vwap?.ready && bar ? vwap.byTime?.[bar.time] : null; }
+  function vwapPass(close, value, direction) {
+    return Number.isFinite(value) && (direction === "up" ? close > value : close < value);
+  }
   function terminal(plan, status, reason, at) { return { ...plan, status, reason, statusAt: at }; }
 
   function reconcile(previous, input) {
-    const { symbol, sessionKey, candidate, confirmed, marketOpen, chartFresh, contract, bars, now } = input;
+    const { symbol, sessionKey, candidate, confirmed, marketOpen, chartFresh, contract, bars, vwap, now } = input;
     const option = contractCheck(contract, now);
     const lastBar = bars?.at(-1);
     let plan = previous && previous.symbol === symbol && previous.sessionKey === sessionKey ? { ...previous } : null;
@@ -48,6 +52,7 @@
     if (plan) {
       if (!marketOpen) return { plan: terminal(plan, "session_end", "ตลาดปิด · หยุดติดตาม ไม่ใช่ผลการเทรด", now), option };
       if (!chartFresh || !lastBar) return { plan: terminal(plan, "data_gap", "กราฟไม่สด · ไม่ยืนยันสัญญาณย้อนหลัง", now), option };
+      if (plan.status === "armed" && !vwap?.ready) return { plan: terminal(plan, "data_gap", `VWAP ใช้ยืนยันไม่ได้ · ${vwap?.reason || "ข้อมูลไม่ครบ"}`, now), option };
       const newBars = bars.filter((bar) => bar.time > plan.lastSeenBarTime);
       if (newBars.length && newBars[0].time - plan.lastSeenBarTime > MAX_BAR_GAP_SECONDS) {
         return { plan: terminal(plan, "data_gap", "แท่ง 1m ขาดช่วง · ไม่เดาว่าเกิดอะไรก่อน", now), option };
@@ -73,7 +78,12 @@
             if (targetTouched) return { plan: terminal(plan, "missed", "ราคาแตะ TP1 ก่อนแท่งยืนยันปิด · ไม่ย้อนหลังจุดเข้า", observedAt), option };
             const overshoot = plan.direction === "up" ? bar.close - plan.entry : plan.entry - bar.close;
             if (overshoot > .25 * plan.risk) return { plan: terminal(plan, "missed", "แท่งยืนยันปิดเลย Entry มากกว่า 0.25R", observedAt), option };
-            plan = { ...plan, status: "triggered", statusAt: observedAt, triggeredAt: observedAt, triggerClose: bar.close,
+            const triggerVwap = vwapAt(vwap, bar);
+            if (!Number.isFinite(triggerVwap)) return { plan: terminal(plan, "data_gap", "VWAP ของแท่งเข้าไม่ครบ · ไม่ยืนยันย้อนหลัง", observedAt), option };
+            if (!vwapPass(bar.close, triggerVwap, plan.direction)) {
+              return { plan: terminal(plan, "missed", "ราคาหุ้นผ่าน Entry แต่ VWAP ไม่ยืนยันทิศทาง", observedAt), option };
+            }
+            plan = { ...plan, status: "triggered", statusAt: observedAt, triggeredAt: observedAt, triggerClose: bar.close, vwapAtTrigger: triggerVwap,
               detectedQuote: { bid: number(contract.bid), ask: number(contract.ask), quoteAt: option.quoteAt, spreadPercent: option.spreadPercent }
             };
           }
@@ -92,6 +102,11 @@
     }
 
     if (!candidate || !confirmed || !marketOpen || !chartFresh || !option.ok || !lastBar || candidate.wideRisk) return { plan: null, option };
+    const armVwap = vwapAt(vwap, lastBar);
+    if (!Number.isFinite(armVwap)) return { plan: null, option, block: `รอ VWAP · ${vwap?.reason || "ข้อมูลของวันตลาดไม่ครบ"}` };
+    if (!vwapPass(lastBar.close, armVwap, candidate.direction)) {
+      return { plan: null, option, block: `VWAP ยังไม่ยืนยันฝั่ง ${candidate.direction === "up" ? "CALL" : "PUT"} · รอแท่ง 1m ใหม่` };
+    }
     const completedFiveEnd = candidate.basedOn + 300;
     if (bars.some((bar) => bar.time >= completedFiveEnd && (candidate.direction === "up" ? bar.high >= candidate.entry : bar.low <= candidate.entry))) {
       return { plan: null, option, block: "ระดับ Entry ถูกแตะไปแล้วในแท่ง 1m ล่าสุด · รอ setup 5m ใหม่" };
@@ -101,7 +116,7 @@
     }
     return { plan: {
       ...candidate, symbol, sessionKey, contractSymbol: contract.symbol, status: "armed", reason: "",
-      createdAt: now, expiresAt: now + ARM_MINUTES * 60_000, statusAt: now,
+      createdAt: now, expiresAt: now + ARM_MINUTES * 60_000, statusAt: now, vwapAtArm: armVwap,
       lastSeenBarTime: lastBar.time
     }, option };
   }
