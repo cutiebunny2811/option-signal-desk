@@ -57,3 +57,44 @@ body,.main-panel{background:var(--bg)}.topbar,.watch-panel,.contract-panel{backg
 .tf-reading-note{margin:8px 0 0;padding:7px 10px;border-left:2px solid var(--gold);color:var(--muted);font-size:.75rem;line-height:1.45}
 .chart-footer{align-items:flex-start;flex-wrap:wrap}.chart-footer span:last-child{text-align:right}
 @media(max-width:760px){.signal-card{min-height:122px}.signal-primary b{font-size:.96rem}.chart-footer span:last-child{text-align:left}}
+
+/* Focus list: a small, account-scoped trading desk rather than the whole PCC watchlist. */
+.focus-intro{color:var(--muted);font-size:.76rem;line-height:1.5;margin:12px 8px 0}
+.focus-form{display:grid;grid-template-columns:1fr 70px;min-width:0;margin:14px 4px 4px;border:1px solid var(--line);background:var(--surface-2)}
+.focus-form:focus-within{border-color:var(--gold)}
+.focus-form input{grid-column:1/-1;min-width:0;width:100%;padding:9px 10px;border:0;border-bottom:1px solid var(--line);outline:0;background:transparent;color:var(--text);text-transform:uppercase;font-size:.77rem}
+.focus-form select{min-width:0;border:0;outline:0;background:var(--surface-2);color:var(--text);padding:7px 9px;font-size:.74rem}
+.focus-form button{border:0;border-left:1px solid var(--line);background:var(--gold);color:#15130b;padding:8px 10px;font-size:.75rem;font-weight:700}
+.focus-form button:hover{background:var(--gold-hi)}
+.focus-feedback{min-height:1.2em;margin:4px 8px 8px;color:var(--gold-hi);font-size:.72rem;line-height:1.35}
+.watch-list{max-height:min(43vh,470px)}
+.focus-row{display:grid;grid-template-columns:minmax(0,1fr) 32px;border-bottom:1px solid var(--line-soft);border-left:2px solid transparent;background:transparent}
+.focus-row.active{border-left-color:var(--gold);background:#1c1a0d}
+.focus-row.up:not(.active){border-left-color:var(--green);background:#071b14}
+.focus-row.down:not(.active){border-left-color:var(--ruby-hi);background:#200b10}
+.focus-open{display:grid;grid-template-columns:1fr auto;gap:3px 5px;min-width:0;width:100%;padding:9px 4px 9px 10px;text-align:left;border:0;background:transparent;color:var(--text)}
+.focus-open:hover,.focus-remove:hover{background:rgba(255,255,255,.045)}
+.focus-open strong{font:700 .86rem var(--mono)}
+.focus-open span{font:600 .76rem var(--mono);white-space:nowrap}
+.focus-open small{grid-column:1/-1;color:var(--muted);font-size:.68rem;line-height:1.35}
+.focus-row.up .focus-open small{color:var(--green)}.focus-row.down .focus-open small{color:var(--ruby-hi)}
+.focus-remove{border:0;background:transparent;color:var(--faint);font-size:1.1rem;align-self:stretch}
+.focus-remove:hover{color:var(--ruby-hi)}
+.focus-alerts{margin:18px 4px 0;padding-top:13px;border-top:1px solid var(--line)}
+.focus-alert-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px}
+.focus-alert-heading h3{font-size:.88rem;margin:0}
+.notify-button{width:100%;border:1px solid var(--gold);background:#1c190b;color:var(--gold-hi);padding:8px 9px;text-align:left;font-size:.74rem;font-weight:700}
+.notify-button:hover:not(:disabled){background:#2b250e}
+.notify-button:disabled{border-color:var(--line);background:var(--surface-2);color:var(--muted);opacity:1}
+.notify-state{margin:7px 0 10px;color:var(--faint);font-size:.68rem;line-height:1.45}
+.notify-scope{margin:0 0 10px;color:var(--muted);font-size:.68rem;line-height:1.45}
+.alert-list{list-style:none;max-height:240px;overflow:auto;padding:0;margin:0;border-top:1px solid var(--line-soft)}
+.alert-list li{border-bottom:1px solid var(--line-soft)}
+.alert-list button{display:block;width:100%;padding:8px 3px;border:0;background:transparent;color:var(--text);text-align:left}
+.alert-list button:hover{background:var(--surface-2)}
+.alert-list strong,.alert-list span,.alert-list time{display:block}
+.alert-list strong{font-size:.74rem}.alert-list span{color:var(--muted);font-size:.69rem;line-height:1.4;margin-top:2px}.alert-list time{color:var(--faint);font:.65rem var(--mono);margin-top:4px}
+.alert-empty{padding:9px 3px;color:var(--faint);font-size:.71rem}
+.alert-toast{position:fixed;right:18px;bottom:18px;z-index:100;width:min(360px,calc(100vw - 36px));padding:13px 15px;background:#0b1511;border:1px solid var(--green);border-left:4px solid var(--green);box-shadow:0 10px 28px rgba(0,0,0,.55)}
+.alert-toast strong,.alert-toast span{display:block}.alert-toast strong{color:var(--green);font-size:.9rem}.alert-toast span{margin-top:4px;font-size:.77rem;line-height:1.45}
+@media(max-width:760px){.focus-intro,.watch-note{display:none}.focus-form{margin:6px 0 3px}.focus-feedback{margin:3px 0 5px}.watch-list{max-height:none}.focus-row{flex:0 0 158px;border:1px solid var(--line);border-left:2px solid transparent}.focus-row.active{border-left-color:var(--gold)}.focus-open{padding:7px}.focus-open small{font-size:.63rem}.focus-alerts{margin:0;padding:9px 0 11px}.focus-alert-heading{margin-bottom:6px}.notify-state{margin:4px 0 6px}.alert-list{display:flex;gap:8px;max-height:none;overflow-x:auto;border:0}.alert-list li{flex:0 0 170px;border:1px solid var(--line-soft)}.alert-list li.alert-empty{flex:1;padding:4px;border:0}.alert-list button{padding:5px}}

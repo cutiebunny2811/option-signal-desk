@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -27,11 +27,20 @@
     </header>
 
     <div class="desk-layout">
-      <aside class="watch-panel" aria-label="รายชื่อหุ้น">
-        <div class="panel-title"><span class="index">01 / WATCHLIST</span><h2>หุ้นที่ติดตาม</h2></div>
-        <label class="search-field"><span class="sr-only">ค้นหาหุ้น</span><input id="watch-search" type="search" placeholder="ค้นหา ticker" autocomplete="off" spellcheck="false"><span aria-hidden="true">⌕</span></label>
+      <aside class="watch-panel" aria-label="หุ้นเฝ้าเทรดและแจ้งเตือน">
+        <div class="panel-title"><span class="index">01 / FOCUS LIST</span><h2>หุ้นเฝ้าเทรด</h2></div>
+        <p class="focus-intro">เฉพาะตัวที่อยากจับจังหวะ · ไม่เปลี่ยน Watchlist ใน PCC</p>
+        <form id="focus-form" class="focus-form"><label class="sr-only" for="focus-input">เพิ่ม ticker ที่เฝ้า</label><input id="focus-input" name="symbol" maxlength="10" placeholder="เพิ่ม ticker เช่น IREN" autocomplete="off" spellcheck="false" required><label class="sr-only" for="focus-asset-type">ประเภทสินทรัพย์</label><select id="focus-asset-type" name="asset_type" aria-label="ประเภทสินทรัพย์"><option value="stock">หุ้น</option><option value="etf">ETF</option></select><button type="submit">เพิ่ม</button></form>
+        <p class="focus-feedback" id="focus-feedback" role="status" aria-live="polite"></p>
         <div class="watch-list" id="watch-list"></div>
-        <p class="watch-note">เพิ่มหรือลบหุ้นใน PCC · ที่นี่ใช้รายการเดียวกัน</p>
+        <p class="watch-note" id="focus-scan-note">สแกนเฉพาะรายการนี้เมื่อเปิดหน้าและตลาดเปิด · สัญญาณเฝ้าดูไม่ใช่จุดซื้อ</p>
+        <section class="focus-alerts" aria-labelledby="focus-alert-title">
+          <div class="focus-alert-heading"><span class="index">ALERTS</span><h3 id="focus-alert-title">แจ้งเตือน</h3></div>
+          <button id="notify-button" class="notify-button" type="button">เปิดแจ้งเตือนเบราว์เซอร์</button>
+          <p id="notify-state" class="notify-state">แจ้งในหน้านี้ได้ทันที · แจ้งเตือนเบราว์เซอร์ต้องกดอนุญาต</p>
+          <p class="notify-scope">หุ้นอื่นแจ้งเมื่อ 4/4 เปลี่ยน · จุดเข้า/SL แจ้งเฉพาะหุ้นที่เปิดดูและมีแผนล็อก</p>
+          <ol id="alert-list" class="alert-list"></ol>
+        </section>
       </aside>
 
       <main class="main-panel">
@@ -89,6 +98,7 @@
         <div class="decision-note" id="decision-note"></div>
       </aside>
     </div>
+    <div id="alert-toast" class="alert-toast" role="status" aria-live="polite" hidden></div>
     <footer class="site-footer"><span>OPTION SIGNAL DESK / PCC DATA</span><span>ข้อมูลเพื่อประกอบการตัดสินใจ · ไม่มีการส่งคำสั่งซื้อขายจากหน้านี้</span></footer>
   </div>
 
@@ -96,7 +106,7 @@
     <div class="auth-card">
       <span class="index">PCC / OPTION SIGNAL DESK</span>
       <h1>เข้าใจ option<br>ก่อนเลือกสัญญา</h1>
-      <p>ใช้บัญชีเดียวกับ Portfolio Command Center เพื่อดู watchlist, ราคาหุ้น และข้อมูล OPRA ตามสิทธิ์ของคุณ</p>
+      <p>ใช้บัญชีเดียวกับ Portfolio Command Center เพื่อดูหุ้นเฝ้าเทรด, ราคาหุ้น และข้อมูล OPRA ตามสิทธิ์ของคุณ</p>
       <form id="login-form" class="login-form"><label>อีเมล<input name="email" type="email" autocomplete="username" required></label><label>รหัสผ่าน<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">เข้าสู่ Dashboard</button></form>
       <p class="auth-message" id="auth-message" role="status"></p>
       <small>ระบบนี้อ่านข้อมูลอย่างเดียว · จัดการบัญชีและพอร์ตที่ PCC</small>
@@ -109,6 +119,7 @@
   <script src="price-levels.js?v=2"></script>
   <script src="trade-plan.js?v=1"></script>
   <script src="chart-time.js?v=1"></script>
-  <script src="app.js?v=13"></script>
+  <script src="focus-list.js?v=1"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

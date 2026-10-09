@@ -5,6 +5,7 @@
   const priceLevels = window.OptionDeskLevels;
   const tradePlan = window.OptionDeskTradePlan;
   const chartTime = window.OptionDeskChartTime;
+  const focusList = window.OptionDeskFocus;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -18,10 +19,11 @@
     return Number.isFinite(date.getTime()) ? date.toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) + " น." : "ไม่ทราบเวลา";
   };
   const state = {
-    db: null, user: null, watchlist: [], pulse: [], search: "", symbol: "", instrumentId: null,
+    db: null, user: null, focusSymbols: [], focusAssetTypes: {}, focusSignals: {}, alerts: [], focusInstrumentIds: {},
+    focusScanAt: 0, focusScanCursor: 0, focusScanBusy: false, symbol: "", instrumentId: null,
     call: null, put: null, expiry: "", side: "call", contractSymbol: "", charts: {}, chartFrame: "M1",
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
-    lastOptionAttemptAt: 0, lastChartAttemptAt: {}, lastWatchlistReadAt: 0,
+    lastOptionAttemptAt: 0, lastChartAttemptAt: {},
     lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto",
     tradePlan: null, optionGate: null, planBlock: ""
   };
@@ -30,6 +32,9 @@
   const MINUTE_POLL_MS = 2 * 60_000;
   const HOUR_POLL_MS = 10 * 60_000;
   const IDLE_PAUSE_MS = 20 * 60_000;
+  const FOCUS_SCAN_SPACING_MS = 45_000;
+  const FOCUS_STATUS_MAX_AGE_MS = 8 * 60_000;
+  let alertToastTimer = null;
 
   function marketOpenNow() {
     if (demo) return true;
@@ -64,9 +69,9 @@
     return chartTime.completedBars(normalizeBars(input), frame, source?.fetched_at);
   }
 
-  function aggregateBars(input, minutes) {
+  function aggregateBars(input, minutes, source = state.charts.M1) {
     const groups = new Map();
-    for (const bar of closedBars(input, "M1", state.charts.M1)) {
+    for (const bar of closedBars(input, "M1", source)) {
       const bucket = Math.floor(bar.time / (minutes * 60)) * minutes * 60;
       if (!groups.has(bucket)) groups.set(bucket, []);
       groups.get(bucket).push(bar);
@@ -78,13 +83,13 @@
     }));
   }
 
-  function barsFor(frame) {
-    if (frame === "M5") return aggregateBars(state.charts.M1?.bars, 5);
-    if (frame === "M15") return aggregateBars(state.charts.M1?.bars, 15);
-    return closedBars(state.charts[frame]?.bars, frame, state.charts[frame]);
+  function barsFor(frame, charts = state.charts) {
+    if (frame === "M5") return aggregateBars(charts.M1?.bars, 5, charts.M1);
+    if (frame === "M15") return aggregateBars(charts.M1?.bars, 15, charts.M1);
+    return closedBars(charts[frame]?.bars, frame, charts[frame]);
   }
 
-  function sourceFor(frame) { return state.charts[["M5", "M15"].includes(frame) ? "M1" : frame]; }
+  function sourceFor(frame, charts = state.charts) { return charts[["M5", "M15"].includes(frame) ? "M1" : frame]; }
 
   function rsi(values, period = 14) {
     if (values.length <= period) return null;
@@ -113,8 +118,8 @@
     return { direction: "wait", label: "รอ", detail: `${rsiLabel} · ยังไม่ตรง`, usable: true };
   }
 
-  function trendFor(frame) {
-    const bars = barsFor(frame);
+  function trendFor(frame, charts = state.charts) {
+    const bars = barsFor(frame, charts);
     const lastBar = bars.at(-1), closeTime = chartTime.barEndMs(lastBar, frame);
     const reference = { lastBar, closeTime };
     if (bars.length < 25) return { ...reference, direction: "wait", label: "รอข้อมูล", detail: "แท่งราคาไม่พอ" };
@@ -122,19 +127,103 @@
     // A completed higher-timeframe candle stays valid until its successor closes.
     // Give each frame one full candle plus a small provider/cache arrival margin.
     const maxLag = { M1: 4, M5: 8, M15: 18, M60: 65 }[frame] || 65;
-    if (sourceFor(frame)?.stale || Date.now() - closeTime > maxLag * 60_000) {
+    if (sourceFor(frame, charts)?.stale || Date.now() - closeTime > maxLag * 60_000) {
       return { ...reference, direction: "wait", label: "ข้อมูลเก่า", detail: "รอแท่งราคาใหม่", stale: true };
     }
     return { ...reference, ...technicalTrend(bars) };
   }
 
+  function focusStorageKey(kind) { return `option-desk:${kind}:v1:${state.user?.id || "demo"}`; }
+
+  function loadFocusPreferences() {
+    try {
+      const saved = localStorage.getItem(focusStorageKey("focus"));
+      state.focusSymbols = saved === null ? [...focusList.DEFAULT_SYMBOLS] : focusList.cleanSymbols(JSON.parse(saved));
+      const types = JSON.parse(localStorage.getItem(focusStorageKey("focus-types")) || "{}");
+      state.focusAssetTypes = types && typeof types === "object" && !Array.isArray(types) ? types : {};
+      state.focusAssetTypes.QQQ = "etf";
+      const alerts = JSON.parse(localStorage.getItem(focusStorageKey("alerts")) || "[]");
+      state.alerts = Array.isArray(alerts) ? alerts.filter((item) => item && typeof item.id === "string" && typeof item.symbol === "string" && typeof item.title === "string" && typeof item.body === "string" && Number.isFinite(item.at) && Number.isFinite(new Date(item.at).getTime())).slice(0, 20) : [];
+    } catch (_) {
+      state.focusSymbols = [...focusList.DEFAULT_SYMBOLS];
+      state.focusAssetTypes = { QQQ: "etf" };
+      state.alerts = [];
+    }
+  }
+
+  function saveFocusPreferences() {
+    try {
+      localStorage.setItem(focusStorageKey("focus"), JSON.stringify(state.focusSymbols));
+      localStorage.setItem(focusStorageKey("focus-types"), JSON.stringify(state.focusAssetTypes));
+    }
+    catch (_) { $("#focus-feedback").textContent = "บันทึกรายการในเบราว์เซอร์ไม่ได้ · รายการอาจหายเมื่อปิดหน้า"; }
+  }
+
+  function focusSummary(charts) {
+    const trends = ["M1", "M5", "M15", "M60"].map((frame) => trendFor(frame, charts));
+    const up = trends.filter((item) => item.direction === "up").length;
+    const down = trends.filter((item) => item.direction === "down").length;
+    const fresh = trends.every((item) => item.usable && !item.stale && !item.closed);
+    return {
+      direction: fresh && up === 4 ? "up" : fresh && down === 4 ? "down" : "wait",
+      fresh, up, down, price: trends[0].lastBar?.close ?? null,
+      asOf: trends[0].closeTime || 0, checkedAt: Date.now()
+    };
+  }
+
   function renderWatchlist() {
-    const rows = state.watchlist.filter((item) => item.symbol.includes(state.search));
-    const prices = new Map(state.pulse.map((row) => [String(row.symbol).toUpperCase(), row]));
-    $("#watch-list").innerHTML = rows.length ? rows.map((item) => {
-      const quote = prices.get(item.symbol);
-      return `<button class="watch-item ${item.symbol === state.symbol ? "active" : ""}" type="button" data-symbol="${esc(item.symbol)}" aria-pressed="${item.symbol === state.symbol}"><strong>${esc(item.symbol)}</strong><span class="watch-price">${money(quote?.price)}</span><small>${esc(item.name || "หุ้นใน PCC")}</small></button>`;
-    }).join("") : `<p class="empty-list">${state.search ? "ไม่พบ ticker ที่ค้นหา" : "ยังไม่มีหุ้นใน watchlist"}</p>`;
+    $("#watch-list").innerHTML = state.focusSymbols.length ? state.focusSymbols.map((symbol) => {
+      const signal = state.focusSignals[symbol];
+      const current = signal && marketOpenNow() && Date.now() - signal.checkedAt <= FOCUS_STATUS_MAX_AGE_MS && signal.fresh;
+      const direction = current ? signal.direction : "wait";
+      const label = signal?.missing ? "กราฟไม่พร้อม · ตรวจข้อมูล PCC" : signal?.error ? "สแกนไม่สำเร็จ" : !marketOpenNow() ? "ตลาดปิด · รอรอบถัดไป" : !current ? "รอสแกน / ข้อมูลเก่า" : direction === "up" ? "เฝ้า CALL · 4/4" : direction === "down" ? "เฝ้า PUT · 4/4" : `${signal.up}/4 ขึ้น · ${signal.down}/4 ลง`;
+      const time = signal?.checkedAt ? `ตรวจ ${bkkTime(signal.checkedAt)}` : "ยังไม่สแกน";
+      return `<div class="focus-row ${direction} ${symbol === state.symbol ? "active" : ""}"><button class="focus-open" type="button" data-symbol="${esc(symbol)}" aria-pressed="${symbol === state.symbol}"><strong>${esc(symbol)}</strong><span>${money(signal?.price)}</span><small>${esc(label)} · ${esc(time)}</small></button><button class="focus-remove" type="button" data-remove-symbol="${esc(symbol)}" aria-label="ลบ ${esc(symbol)} จากหุ้นเฝ้าเทรด" title="ลบจากหุ้นเฝ้าเทรด">×</button></div>`;
+    }).join("") : `<p class="empty-list">ยังไม่มีหุ้นเฝ้าเทรด · เพิ่ม ticker ด้านบน</p>`;
+    $("#focus-scan-note").textContent = `${state.focusSymbols.length}/${focusList.MAX_SYMBOLS} ตัว · สแกนสลับตัวเมื่อหน้าเปิดและตลาดเปิด · เฝ้า CALL/PUT เป็นทิศทาง 4/4 ไม่ใช่จุดซื้อ`;
+  }
+
+  function renderAlerts() {
+    $("#alert-list").innerHTML = state.alerts.length ? state.alerts.slice(0, 5).map((item) => `<li><button type="button" data-alert-symbol="${esc(item.symbol)}"><strong>${esc(item.title)}</strong><span>${esc(item.body)}</span><time datetime="${new Date(item.at).toISOString()}">${bkkTime(item.at)}</time></button></li>`).join("") : `<li class="alert-empty">ยังไม่มีแจ้งเตือนใหม่</li>`;
+    const supported = "Notification" in window && window.isSecureContext;
+    const permission = supported ? Notification.permission : "unsupported";
+    const button = $("#notify-button");
+    button.disabled = !supported || permission !== "default";
+    button.textContent = permission === "granted" ? "แจ้งเตือนเบราว์เซอร์: เปิดแล้ว" : permission === "denied" ? "แจ้งเตือนเบราว์เซอร์: ถูกบล็อก" : supported ? "เปิดแจ้งเตือนเบราว์เซอร์" : "เบราว์เซอร์ไม่รองรับแจ้งเตือน";
+    $("#notify-state").textContent = permission === "granted" ? "แจ้งเตือนขณะหน้านี้เปิดอยู่ · ปิดหน้าแล้วระบบหยุดสแกน" : permission === "denied" ? "อนุญาตใหม่ได้ในตั้งค่าเว็บไซต์ของเบราว์เซอร์ · แจ้งในหน้ายังทำงาน" : "แจ้งในหน้าได้ทันที · ต้องกดอนุญาตเพื่อแจ้งนอกแท็บ";
+  }
+
+  function emitAlert(id, symbol, title, body, at = Date.now()) {
+    if (state.alerts.some((item) => item.id === id)) return;
+    const item = { id, symbol, title, body, at };
+    state.alerts.unshift(item);
+    state.alerts = state.alerts.slice(0, 20);
+    try { localStorage.setItem(focusStorageKey("alerts"), JSON.stringify(state.alerts)); } catch (_) { /* Keep alerts in this tab. */ }
+    renderAlerts();
+    const toast = $("#alert-toast");
+    toast.innerHTML = `<strong>${esc(title)}</strong><span>${esc(body)}</span>`;
+    toast.hidden = false;
+    clearTimeout(alertToastTimer);
+    alertToastTimer = setTimeout(() => { toast.hidden = true; }, 9_000);
+    if (!demo && "Notification" in window && Notification.permission === "granted") {
+      try { new Notification(title, { body, tag: id }); } catch (_) { /* In-page alert still works. */ }
+    }
+  }
+
+  function updateFocusSignal(symbol, summary) {
+    if (!state.focusSymbols.includes(symbol)) return;
+    const previous = state.focusSignals[symbol];
+    state.focusSignals[symbol] = summary;
+    const direction = focusList.transition(previous, summary);
+    if (direction && marketOpenNow() && !demo) {
+      const side = direction === "up" ? "CALL" : "PUT";
+      emitAlert(`watch:${symbol}:${side}:${summary.asOf}`, symbol, `${symbol} · เริ่มเฝ้า ${side}`, `ทิศทางแท่งปิดตรงกัน 4/4 · ยังไม่ใช่จุดเข้า · ตรวจ Option และแผนก่อน`);
+    }
+    renderWatchlist();
+  }
+
+  function updateFocusFromSelected() {
+    if (state.focusSymbols.includes(state.symbol) && state.charts.M1 && state.charts.M60) updateFocusSignal(state.symbol, focusSummary(state.charts));
   }
 
   function renderHeader() {
@@ -221,7 +310,8 @@
     const chartFresh = Boolean(lastFive && lastMinute && !source?.stale
       && now - (lastFive.time + 300) * 1000 <= 8 * 60_000
       && now - (lastMinute.time + 60) * 1000 <= 4 * 60_000);
-    const result = tradePlan.reconcile(state.tradePlan, {
+    const previousPlan = state.tradePlan;
+    const result = tradePlan.reconcile(previousPlan, {
       symbol: state.symbol, sessionKey: tradingDate(now), candidate,
       confirmed: state.planDirection === direction && direction !== "wait" && !candidate?.wideRisk,
       marketOpen: marketOpenNow(), chartFresh,
@@ -231,6 +321,18 @@
     state.optionGate = result.option;
     state.planBlock = result.block || "";
     savePlan();
+    if (state.focusSymbols.includes(state.symbol) && previousPlan && result.plan && previousPlan.status !== result.plan.status) {
+      const plan = result.plan;
+      const quote = plan.detectedQuote;
+      const messages = {
+        triggered: [`${state.symbol} · Entry ผ่าน`, `หุ้นปิดผ่าน ${money(plan.entry)} · ${plan.contractSymbol} bid/ask ${money(quote?.bid)} / ${money(quote?.ask)} ณ ${quote?.quoteAt ? bkkTime(quote.quoteAt) : "ไม่ทราบเวลา"} · ตรวจ broker ก่อนตัดสินใจ`],
+        tp1: [`${state.symbol} · หุ้นแตะ TP1`, `ราคาหุ้นแตะ ${money(plan.tp1)} · ตรวจสถานะสัญญาจริง`],
+        tp2: [`${state.symbol} · หุ้นแตะ TP2`, `ราคาหุ้นแตะ ${money(plan.tp2)} · ตรวจสถานะสัญญาจริง`],
+        stopped: [`${state.symbol} · หุ้นแตะ SL`, `ราคาหุ้นแตะ ${money(plan.stop)} · ไม่ใช่คำสั่งขายออปชัน`],
+        data_gap: [`${state.symbol} · ข้อมูลขาดช่วง`, `ระบบหยุดติดตามแผน · ตรวจสถานะจริงใน broker`]
+      };
+      if (messages[plan.status]) emitAlert(`plan:${state.symbol}:${plan.createdAt}:${plan.status}`, state.symbol, ...messages[plan.status], plan.statusAt || now);
+    }
   }
 
   function levelState() {
@@ -528,37 +630,61 @@
     catch (error) { return { ...cached, stale: true, refresh_error: error.message }; }
   }
 
-  async function loadWatchlist() {
-    state.lastWatchlistReadAt = Date.now();
-    if (demo) {
-      state.watchlist = ["SKHY", "CRWV", "NVDA", "AMD", "MU", "TSLA"].map((symbol) => ({ symbol, name: "ข้อมูลตัวอย่าง", id: symbol }));
-      state.pulse = state.watchlist.map((item) => ({ symbol: item.symbol, price: demoChain(item.symbol, "call").underlying.price }));
-      renderWatchlist();
-      return;
-    }
-    const [{ data: watchlist, error: watchError }, { data: pulse, error: pulseError }] = await Promise.all([
-      state.db.from("watchlist_items").select("instrument_id,created_at").order("created_at"),
-      state.db.from("market_pulse_latest").select("symbol,price,market_time,fetched_at,is_watchlist").eq("is_watchlist", true)
-    ]);
-    if (watchError) throw new Error(`Watchlist: ${watchError.message}`);
-    if (pulseError) throw new Error(`Market Pulse: ${pulseError.message}`);
-    state.pulse = pulse || [];
-    const ids = [...new Set((watchlist || []).map((item) => item.instrument_id).filter(Boolean))];
-    if (!ids.length) { state.watchlist = []; renderWatchlist(); return; }
-    const { data: instruments, error: instrumentError } = await state.db.from("instruments").select("id,symbol,display_name,asset_type").in("id", ids);
-    if (instrumentError) throw new Error(`Instruments: ${instrumentError.message}`);
-    const byId = new Map((instruments || []).map((row) => [row.id, row]));
-    state.watchlist = ids.map((id) => byId.get(id)).filter((row) => row && ["stock", "etf"].includes(row.asset_type)).map((row) => ({ id: row.id, symbol: String(row.symbol).toUpperCase(), name: row.display_name || row.symbol }));
-    renderWatchlist();
-  }
-
   async function resolveInstrument(symbol) {
-    const known = state.watchlist.find((item) => item.symbol === symbol);
-    if (known) return known.id;
     if (demo) return symbol;
+    if (state.focusInstrumentIds[symbol]) return state.focusInstrumentIds[symbol];
     const { data, error } = await state.db.from("instruments").select("id,symbol,asset_type").eq("symbol", symbol).in("asset_type", ["stock", "etf"]).limit(1);
     if (error) return null;
-    return data?.[0]?.id || null;
+    let id = data?.[0]?.id || null;
+    if (!id && state.focusSymbols.includes(symbol)) {
+      const assetType = state.focusAssetTypes[symbol] === "etf" ? "etf" : "stock";
+      const { data: createdId, error: createError } = await state.db.rpc("api_upsert_instrument", {
+        p_asset_type: assetType, p_symbol: symbol, p_display_name: symbol,
+        p_exchange: null, p_currency: "USD", p_option_type: null,
+        p_strike: null, p_expiry: null, p_multiplier: 1
+      });
+      if (createError) return null;
+      id = createdId || null;
+    }
+    if (id) state.focusInstrumentIds[symbol] = id;
+    return id;
+  }
+
+  async function maybeScanFocus() {
+    if (!state.user || state.focusScanBusy || state.busy || document.hidden || !marketOpenNow()) return;
+    if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
+    if (Date.now() - state.focusScanAt < FOCUS_SCAN_SPACING_MS) return;
+    const length = state.focusSymbols.length;
+    if (length < 2) return;
+    let symbol = "";
+    for (let offset = 0; offset < length; offset += 1) {
+      const index = (state.focusScanCursor + offset) % length;
+      const candidate = state.focusSymbols[index];
+      if (candidate !== state.symbol && Date.now() - (state.focusSignals[candidate]?.checkedAt || 0) >= 4 * 60_000) {
+        symbol = candidate;
+        state.focusScanCursor = (index + 1) % length;
+        break;
+      }
+    }
+    if (!symbol) return;
+    state.focusScanBusy = true;
+    state.focusScanAt = Date.now();
+    try {
+      const instrumentId = await resolveInstrument(symbol);
+      if (!instrumentId) {
+        state.focusSignals[symbol] = { direction: "wait", fresh: false, missing: true, checkedAt: Date.now(), asOf: 0 };
+        renderWatchlist();
+        return;
+      }
+      const [minute, hour] = await Promise.all([getChart(instrumentId, "M1", symbol), getChart(instrumentId, "M60", symbol)]);
+      const summary = focusSummary({ M1: minute, M60: hour });
+      if (minute?.refresh_error || hour?.refresh_error) summary.error = minute?.refresh_error || hour?.refresh_error;
+      updateFocusSignal(symbol, summary);
+    } catch (error) {
+      if (/429|rate.?limit|too many requests/i.test(error.message || "")) state.quotaPauseUntil = Date.now() + 10 * 60_000;
+      state.focusSignals[symbol] = { direction: "wait", fresh: false, error: error.message || "แหล่งข้อมูลไม่พร้อม", checkedAt: Date.now(), asOf: 0 };
+      renderWatchlist();
+    } finally { state.focusScanBusy = false; }
   }
 
   async function loadSymbol(symbol, { expiry = "", refresh = false, options = true, chartFrames = null, background = false } = {}) {
@@ -609,18 +735,26 @@
       if (/429|rate.?limit|too many requests/i.test(error.message)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(error.message || "อ่านข้อมูลไม่สำเร็จ", true);
     } finally {
-      if (requestId === state.requestId) { state.busy = false; renderAll(); }
+      if (requestId === state.requestId) { state.busy = false; updateFocusFromSelected(); renderAll(); }
     }
   }
 
   async function showDesk(user) {
+    if (state.user?.id !== user?.id) {
+      state.focusSignals = {}; state.focusInstrumentIds = {}; state.symbol = ""; state.instrumentId = null;
+      state.call = null; state.put = null; state.charts = {}; state.tradePlan = null;
+    }
     state.user = user;
     $("#auth-shell").hidden = true;
     $("#app-shell").hidden = false;
     $("#account-name").textContent = demo ? "ตัวอย่างในเครื่อง" : user?.email || "PCC member";
+    loadFocusPreferences();
+    renderWatchlist();
+    renderAlerts();
     try {
-      await loadWatchlist();
-      await loadSymbol(state.watchlist[0]?.symbol || "NVDA");
+      await loadSymbol(state.focusSymbols[0] || "NVDA");
+      state.focusScanCursor = state.focusSymbols.length > 1 ? 1 : 0;
+      void maybeScanFocus();
     } catch (error) {
       setStatus(error.message || "โหลดรายการหุ้นไม่สำเร็จ", true);
       renderAll();
@@ -630,13 +764,15 @@
   function showLogin() {
     state.requestId++;
     state.user = null;
+    state.focusSymbols = []; state.focusAssetTypes = {}; state.focusSignals = {}; state.alerts = []; state.focusInstrumentIds = {};
+    state.symbol = ""; state.instrumentId = null; state.call = null; state.put = null; state.charts = {}; state.tradePlan = null;
     clearChart();
     $("#app-shell").hidden = true;
     $("#auth-shell").hidden = false;
   }
 
   async function init() {
-    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars) {
+    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars || !focusList?.cleanSymbols) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
       return;
@@ -671,8 +807,44 @@
     } finally { button.disabled = false; }
   });
   $("#sign-out").addEventListener("click", async () => { if (!demo) await state.db.auth.signOut(); else location.href = location.pathname; });
-  $("#watch-search").addEventListener("input", (event) => { state.search = event.target.value.trim().toUpperCase(); renderWatchlist(); });
-  $("#watch-list").addEventListener("click", (event) => { const button = event.target.closest("[data-symbol]"); if (button) loadSymbol(button.dataset.symbol); });
+  $("#focus-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = $("#focus-input");
+    const symbol = focusList.symbol(input.value);
+    const feedback = $("#focus-feedback");
+    if (!symbol) { feedback.textContent = "กรอก ticker หุ้นสหรัฐให้ถูกต้อง"; return; }
+    if (state.focusSymbols.includes(symbol)) { feedback.textContent = `${symbol} อยู่ในรายการแล้ว`; return; }
+    if (state.focusSymbols.length >= focusList.MAX_SYMBOLS) { feedback.textContent = `เฝ้าได้สูงสุด ${focusList.MAX_SYMBOLS} ตัวเพื่อถนอมโควต้า`; return; }
+    state.focusSymbols.push(symbol);
+    state.focusAssetTypes[symbol] = $("#focus-asset-type").value === "etf" ? "etf" : "stock";
+    input.value = "";
+    feedback.textContent = `เพิ่ม ${symbol} แล้ว · จะตรวจกราฟเมื่อถึงรอบสแกน`;
+    saveFocusPreferences();
+    renderWatchlist();
+    state.focusScanAt = 0;
+    void maybeScanFocus();
+  });
+  $("#watch-list").addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-symbol]");
+    if (remove) {
+      const symbol = remove.dataset.removeSymbol;
+      state.focusSymbols = state.focusSymbols.filter((item) => item !== symbol);
+      delete state.focusAssetTypes[symbol];
+      delete state.focusSignals[symbol];
+      saveFocusPreferences();
+      $("#focus-feedback").textContent = `ลบ ${symbol} จากหุ้นเฝ้าเทรดแล้ว · กราฟที่เปิดอยู่ไม่ถูกปิด`;
+      renderWatchlist();
+      return;
+    }
+    const button = event.target.closest("[data-symbol]");
+    if (button) void loadSymbol(button.dataset.symbol);
+  });
+  $("#alert-list").addEventListener("click", (event) => { const button = event.target.closest("[data-alert-symbol]"); if (button) void loadSymbol(button.dataset.alertSymbol); });
+  $("#notify-button").addEventListener("click", async () => {
+    if (!("Notification" in window) || !window.isSecureContext || Notification.permission !== "default") return;
+    try { await Notification.requestPermission(); } catch (_) { /* In-page alerts stay available. */ }
+    renderAlerts();
+  });
   $("#symbol-form").addEventListener("submit", (event) => { event.preventDefault(); loadSymbol($("#symbol-input").value); });
   $("#refresh-button").addEventListener("click", () => {
     if (Date.now() - state.lastManualAt < 30_000) { setStatus("เพิ่งรีเฟรชไป · รออย่างน้อย 30 วินาทีเพื่อถนอมโควต้า"); return; }
@@ -710,6 +882,7 @@
 
   async function maybeAutoRefresh() {
     renderDataStatus();
+    renderWatchlist();
     const previousPlanDirection = state.planDirection;
     const previousPlanStatus = state.tradePlan?.status;
     renderSignals();
@@ -718,15 +891,13 @@
     if (previousPlanDirection !== state.planDirection || previousPlanStatus !== state.tradePlan?.status) renderChart();
     if (demo || !state.user || !state.symbol || state.busy || document.hidden || !marketOpenNow()) return;
     if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
-    if (Date.now() - state.lastWatchlistReadAt >= 15 * 60_000) {
-      try { await loadWatchlist(); } catch (error) { setStatus(`Watchlist: ${error.message}`, true); }
-    }
     const now = Date.now();
     const needOptions = now - state.lastOptionAttemptAt >= OPTION_POLL_MS;
     const frames = [];
     if (now - (state.lastChartAttemptAt.M1 || 0) >= MINUTE_POLL_MS) frames.push("M1");
     if (now - (state.lastChartAttemptAt.M60 || 0) >= HOUR_POLL_MS) frames.push("M60");
     if (needOptions || frames.length) await loadSymbol(state.symbol, { expiry: state.expiry, options: needOptions, chartFrames: frames, background: true });
+    await maybeScanFocus();
   }
 
   document.addEventListener("pointerdown", () => { state.lastInteractionAt = Date.now(); }, { passive: true });
@@ -736,6 +907,7 @@
     else renderDataStatus();
   });
   window.setInterval(() => { void maybeAutoRefresh(); }, 30_000);
+  window.setInterval(() => { void maybeScanFocus(); }, 15_000);
 
   init();
 })();
