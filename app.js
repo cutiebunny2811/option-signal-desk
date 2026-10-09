@@ -33,7 +33,6 @@
   const HOUR_POLL_MS = 10 * 60_000;
   const IDLE_PAUSE_MS = 20 * 60_000;
   const FOCUS_SCAN_SPACING_MS = 45_000;
-  const FOCUS_STATUS_MAX_AGE_MS = 8 * 60_000;
   let alertToastTimer = null;
 
   function marketOpenNow() {
@@ -172,15 +171,14 @@
   }
 
   function renderWatchlist() {
+    const marketOpen = marketOpenNow();
+    const now = Date.now();
     $("#watch-list").innerHTML = state.focusSymbols.length ? state.focusSymbols.map((symbol) => {
       const signal = state.focusSignals[symbol];
-      const current = signal && marketOpenNow() && Date.now() - signal.checkedAt <= FOCUS_STATUS_MAX_AGE_MS && signal.fresh;
-      const direction = current ? signal.direction : "wait";
-      const label = signal?.missing ? "กราฟไม่พร้อม · ตรวจข้อมูล PCC" : signal?.error ? "สแกนไม่สำเร็จ" : !marketOpenNow() ? "ตลาดปิด · รอรอบถัดไป" : !current ? "รอสแกน / ข้อมูลเก่า" : direction === "up" ? "เฝ้า CALL · 4/4" : direction === "down" ? "เฝ้า PUT · 4/4" : `${signal.up}/4 ขึ้น · ${signal.down}/4 ลง`;
-      const time = signal?.checkedAt ? `ตรวจ ${bkkTime(signal.checkedAt)}` : "ยังไม่สแกน";
-      return `<div class="focus-row ${direction} ${symbol === state.symbol ? "active" : ""}"><button class="focus-open" type="button" data-symbol="${esc(symbol)}" aria-pressed="${symbol === state.symbol}"><strong>${esc(symbol)}</strong><span>${money(signal?.price)}</span><small>${esc(label)} · ${esc(time)}</small></button><button class="focus-remove" type="button" data-remove-symbol="${esc(symbol)}" aria-label="ลบ ${esc(symbol)} จากหุ้นเฝ้าเทรด" title="ลบจากหุ้นเฝ้าเทรด">×</button></div>`;
+      const display = focusList.presentation(signal, { marketOpen, now });
+      return `<div class="focus-row ${display.tone} ${display.level} ${symbol === state.symbol ? "active" : ""}"><button class="focus-open" type="button" data-symbol="${esc(symbol)}" aria-pressed="${symbol === state.symbol}"><strong class="focus-ticker">${esc(symbol)}</strong><span class="focus-price">${display.current ? money(signal?.price) : "—"}</span><span class="focus-signal"><b class="focus-label">${esc(display.label)}</b><i class="focus-led" aria-hidden="true"></i></span><small class="focus-detail">${esc(display.detail)}</small></button><button class="focus-remove" type="button" data-remove-symbol="${esc(symbol)}" aria-label="ลบ ${esc(symbol)} จากหุ้นเฝ้าเทรด" title="ลบจากหุ้นเฝ้าเทรด">×</button></div>`;
     }).join("") : `<p class="empty-list">ยังไม่มีหุ้นเฝ้าเทรด · เพิ่ม ticker ด้านบน</p>`;
-    $("#focus-scan-note").textContent = `${state.focusSymbols.length}/${focusList.MAX_SYMBOLS} ตัว · สแกนสลับตัวเมื่อหน้าเปิดและตลาดเปิด · เฝ้า CALL/PUT เป็นทิศทาง 4/4 ไม่ใช่จุดซื้อ`;
+    $("#focus-scan-note").textContent = `${state.focusSymbols.length}/${focusList.MAX_SYMBOLS} ตัว · 3/4 เริ่มเฝ้า · 4/4 ทิศทางครบ ไม่ใช่จุดซื้อ · สแกนเมื่อหน้าและตลาดเปิด`;
   }
 
   function renderAlerts() {

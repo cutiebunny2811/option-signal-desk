@@ -22,3 +22,24 @@ test("alerts only on a new, fresh, completed-bar direction transition", () => {
   assert.equal(focus.transition({ ...waiting, fresh: false }, call), null);
   assert.equal(focus.transition(waiting, { ...call, asOf: 1000 }), null);
 });
+
+test("focus rows show a quick watch side without implying a trade entry", () => {
+  const now = 1_000_000;
+  const base = { fresh: true, checkedAt: now, price: 225, direction: "wait" };
+  assert.deepEqual(focus.presentation({ ...base, up: 3, down: 1 }, { now }), {
+    tone: "up", level: "watch", label: "เฝ้า CALL", detail: "ขึ้น 3/4 · ลง 1/4", current: true
+  });
+  assert.deepEqual(focus.presentation({ ...base, direction: "down", up: 0, down: 4 }, { now }), {
+    tone: "down", level: "full", label: "เฝ้า PUT", detail: "ขึ้น 0/4 · ลง 4/4", current: true
+  });
+  assert.equal(focus.presentation({ ...base, up: 2, down: 2 }, { now }).label, "WAIT");
+});
+
+test("closed, missing, and stale scans do not display a live-looking signal", () => {
+  const now = 1_000_000;
+  const signal = { fresh: true, checkedAt: now, direction: "up", up: 4, down: 0 };
+  assert.equal(focus.presentation(signal, { now, marketOpen: false }).label, "ตลาดปิด");
+  assert.equal(focus.presentation({ ...signal, missing: true }, { now }).label, "รอข้อมูล");
+  assert.equal(focus.presentation({ ...signal, checkedAt: now - focus.STATUS_MAX_AGE_MS - 1 }, { now }).label, "ข้อมูลเก่า");
+  assert.equal(focus.presentation(signal, { now: now + focus.STATUS_MAX_AGE_MS }).current, true);
+});
