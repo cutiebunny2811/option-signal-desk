@@ -10,3 +10,10 @@ test("only actual rate-limit responses pause polling", () => {
   assert.equal(apiError.isRateLimited("HTTP 429 Too Many Requests"), true);
   assert.equal(apiError.isRateLimited("rate limit exceeded"), true);
 });
+
+test("unavailable option API is explained without exposing a trace ID", () => {
+  const failure = 'Webull option contracts failed: {"traceId":"private-trace","httpCode":404,"code":"INTERNAL_SERVER_ERROR"}';
+  assert.match(apiError.describe(failure), /Webull OpenAPI.*Option.*404/);
+  assert.doesNotMatch(apiError.describe(failure), /private-trace/);
+  assert.equal(apiError.describe("Other source failure"), "Other source failure");
+});

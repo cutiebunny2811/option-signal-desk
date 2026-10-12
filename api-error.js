@@ -15,5 +15,13 @@
     return /"(?:httpCode|statusCode|status)"\s*:\s*429\b|\bHTTP\s*429\b|\btoo many requests\b|\brate[ -]?limit(?:ed|ing)?\b/i.test(message);
   }
 
-  return { isRateLimited };
+  function describe(value) {
+    const message = String(value?.message ?? value ?? "");
+    if (/Webull option contracts failed/i.test(message) && /"httpCode"\s*:\s*404\b|\bHTTP\s*404\b/i.test(message)) {
+      return "Webull OpenAPI ยังไม่ส่งรายการสัญญา Option (404) · ตรวจสิทธิ์ Option market data สำหรับ API กับ Webull; กราฟหุ้นยังใช้ได้";
+    }
+    return message || "แหล่งข้อมูลไม่พร้อม";
+  }
+
+  return { isRateLimited, describe };
 });

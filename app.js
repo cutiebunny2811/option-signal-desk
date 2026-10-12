@@ -545,7 +545,7 @@
     const putTotal = rows.reduce((sum, row) => sum + (numeric(row.put?.open_interest) || 0), 0);
     const largestCall = rows.reduce((best, row) => (numeric(row.call?.open_interest) || 0) > (numeric(best?.call?.open_interest) || 0) ? row : best, null);
     const largestPut = rows.reduce((best, row) => (numeric(row.put?.open_interest) || 0) > (numeric(best?.put?.open_interest) || 0) ? row : best, null);
-    $("#oi-summary").innerHTML = `<div><small>CALL OI รวม*</small><strong class="call">${count(callTotal)}</strong></div><div><small>PUT OI รวม*</small><strong class="put">${count(putTotal)}</strong></div><div><small>PUT / CALL OI*</small><strong>${callTotal ? (putTotal / callTotal).toFixed(2) : "—"}</strong></div>`;
+    $("#oi-summary").innerHTML = `<div><small>CALL OI รวม*</small><strong class="call">${rows.length ? count(callTotal) : "—"}</strong></div><div><small>PUT OI รวม*</small><strong class="put">${rows.length ? count(putTotal) : "—"}</strong></div><div><small>PUT / CALL OI*</small><strong>${callTotal ? (putTotal / callTotal).toFixed(2) : "—"}</strong></div>`;
     if (!rows.length) { $("#oi-rows").innerHTML = `<tr><td colspan="7" class="empty-panel">${state.busy ? "กำลังอ่าน option chain…" : "ยังไม่มีข้อมูล OI สำหรับหุ้นนี้"}</td></tr>`; return; }
     const maxOi = Math.max(...rows.flatMap((row) => [numeric(row.call?.open_interest) || 0, numeric(row.put?.open_interest) || 0]), 1);
     const nearest = spot === null ? null : rows.reduce((best, row) => Math.abs(row.strike - spot) < Math.abs((best?.strike ?? Infinity) - spot) ? row : best, null)?.strike;
@@ -734,8 +734,8 @@
         state.expiry = state.call?.expiry || state.put?.expiry || expiry;
       }
       frames.forEach((frame, index) => { if (chartResults[index]?.status === "fulfilled") state.charts[frame] = chartResults[index].value; });
-      const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason?.message || "แหล่งข้อมูลไม่พร้อม");
-      for (const result of chartResults) if (result.status === "fulfilled" && result.value?.refresh_error) errors.push(`กราฟ: ${result.value.refresh_error}`);
+      const errors = results.filter((result) => result.status === "rejected").map((result) => apiError.describe(result.reason));
+      for (const result of chartResults) if (result.status === "fulfilled" && result.value?.refresh_error) errors.push(`กราฟ: ${apiError.describe(result.value.refresh_error)}`);
       if (!instrumentId && frames.length && !demo) errors.push("กราฟใช้ได้เฉพาะหุ้นที่อยู่ในรายการ instruments ของ PCC");
       if (errors.some(apiError.isRateLimited)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(errors.length ? `ข้อมูลบางส่วนยังไม่พร้อม: ${[...new Set(errors)].join(" · ")}` : "", errors.length > 0);
