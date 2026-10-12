@@ -18,7 +18,10 @@
   function describe(value) {
     const message = String(value?.message ?? value ?? "");
     if (/Webull option contracts failed/i.test(message) && /"httpCode"\s*:\s*404\b|\bHTTP\s*404\b/i.test(message)) {
-      return "Webull OpenAPI ยังไม่ส่งรายการสัญญา Option (404) · ตรวจสิทธิ์ Option market data สำหรับ API กับ Webull; กราฟหุ้นยังใช้ได้";
+      return "Webull OpenAPI ยังไม่ส่งรายการสัญญา Option (404) · ตรวจสิทธิ์ Option market data สำหรับ API กับ Webull; กราฟหุ้นแสดงเท่าที่มีข้อมูล";
+    }
+    if (/Webull bars failed/i.test(message) && /"httpCode"\s*:\s*404\b|\bHTTP\s*404\b/i.test(message)) {
+      return "Webull ยังไม่ส่งแท่งราคาหุ้นชุดใหม่ (404) · แสดงข้อมูลแคชและไม่ยืนยันสัญญาณจนกว่าข้อมูลจะกลับมา";
     }
     return message || "แหล่งข้อมูลไม่พร้อม";
   }

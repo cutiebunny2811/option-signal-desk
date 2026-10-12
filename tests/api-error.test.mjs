@@ -16,4 +16,5 @@ test("unavailable option API is explained without exposing a trace ID", () => {
   assert.match(apiError.describe(failure), /Webull OpenAPI.*Option.*404/);
   assert.doesNotMatch(apiError.describe(failure), /private-trace/);
   assert.equal(apiError.describe("Other source failure"), "Other source failure");
+  assert.match(apiError.describe('QQQ: Webull bars failed: {"traceId":"private-trace","httpCode":404}'), /แท่งราคาหุ้นชุดใหม่.*404/);
 });
