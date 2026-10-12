@@ -7,6 +7,7 @@
   const chartTime = window.OptionDeskChartTime;
   const focusList = window.OptionDeskFocus;
   const sessionVwap = window.OptionDeskSessionVwap;
+  const apiError = window.OptionDeskApiError;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -689,7 +690,7 @@
       if (minute?.refresh_error || hour?.refresh_error) summary.error = minute?.refresh_error || hour?.refresh_error;
       updateFocusSignal(symbol, summary);
     } catch (error) {
-      if (/429|rate.?limit|too many requests/i.test(error.message || "")) state.quotaPauseUntil = Date.now() + 10 * 60_000;
+      if (apiError.isRateLimited(error)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       state.focusSignals[symbol] = { direction: "wait", fresh: false, error: error.message || "แหล่งข้อมูลไม่พร้อม", checkedAt: Date.now(), asOf: 0 };
       renderWatchlist();
     } finally { state.focusScanBusy = false; }
@@ -736,11 +737,11 @@
       const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason?.message || "แหล่งข้อมูลไม่พร้อม");
       for (const result of chartResults) if (result.status === "fulfilled" && result.value?.refresh_error) errors.push(`กราฟ: ${result.value.refresh_error}`);
       if (!instrumentId && frames.length && !demo) errors.push("กราฟใช้ได้เฉพาะหุ้นที่อยู่ในรายการ instruments ของ PCC");
-      if (errors.some((message) => /429|rate.?limit|too many requests/i.test(message))) state.quotaPauseUntil = Date.now() + 10 * 60_000;
+      if (errors.some(apiError.isRateLimited)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(errors.length ? `ข้อมูลบางส่วนยังไม่พร้อม: ${[...new Set(errors)].join(" · ")}` : "", errors.length > 0);
     } catch (error) {
       if (requestId !== state.requestId) return;
-      if (/429|rate.?limit|too many requests/i.test(error.message)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
+      if (apiError.isRateLimited(error)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(error.message || "อ่านข้อมูลไม่สำเร็จ", true);
     } finally {
       if (requestId === state.requestId) { state.busy = false; updateFocusFromSelected(); renderAll(); }
