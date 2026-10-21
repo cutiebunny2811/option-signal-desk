@@ -23,16 +23,16 @@ test("alerts only on a new, fresh, completed-bar direction transition", () => {
   assert.equal(focus.transition(waiting, { ...call, asOf: 1000 }), null);
 });
 
-test("focus rows show a quick watch side without implying a trade entry", () => {
+test("focus rows distinguish early and aligned short-frame watches", () => {
   const now = 1_000_000;
   const base = { fresh: true, checkedAt: now, price: 225, direction: "wait" };
-  assert.deepEqual(focus.presentation({ ...base, up: 3, down: 1 }, { now }), {
-    tone: "up", level: "watch", label: "เฝ้า CALL", detail: "ขึ้น 3/4 · ลง 1/4", current: true
+  assert.deepEqual(focus.presentation({ ...base, direction: "up", tier: "early", up: 2, down: 0 }, { now }), {
+    tone: "up", level: "watch", label: "เฝ้า CALL", detail: "เร็ว 2/3 · 15m ยังไม่ยืนยัน", current: true
   });
-  assert.deepEqual(focus.presentation({ ...base, direction: "down", up: 0, down: 4 }, { now }), {
-    tone: "down", level: "full", label: "เฝ้า PUT", detail: "ขึ้น 0/4 · ลง 4/4", current: true
+  assert.deepEqual(focus.presentation({ ...base, direction: "down", tier: "aligned", up: 0, down: 3 }, { now }), {
+    tone: "down", level: "full", label: "เฝ้า PUT", detail: "3/3 แท่งปิดตรงกัน", current: true
   });
-  assert.equal(focus.presentation({ ...base, up: 2, down: 2 }, { now }).label, "WAIT");
+  assert.equal(focus.presentation({ ...base, up: 2, down: 1 }, { now }).label, "WAIT");
 });
 
 test("closed, missing, and stale scans do not display a live-looking signal", () => {

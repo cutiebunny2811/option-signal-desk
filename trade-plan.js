@@ -58,7 +58,7 @@
         return { plan: terminal(plan, "data_gap", "แท่ง 1m ขาดช่วง · ไม่เดาว่าเกิดอะไรก่อน", now), option };
       }
       if (plan.status === "armed" && (!confirmed || !option.ok || contract?.symbol !== plan.contractSymbol)) {
-        return { plan: terminal(plan, "cancelled", !confirmed ? "แนวโน้ม 4/4 หลุด" : "สัญญาหรือ quote ไม่ผ่านเกณฑ์", now), option };
+        return { plan: terminal(plan, "cancelled", !confirmed ? "ทิศทางแท่งสั้นหลุดหรือ 15m สวนทาง" : "สัญญาหรือ quote ไม่ผ่านเกณฑ์", now), option };
       }
       for (const bar of newBars) {
         if (bar.time - plan.lastSeenBarTime > MAX_BAR_GAP_SECONDS) return { plan: terminal(plan, "data_gap", "แท่ง 1m ขาดช่วง", now), option };

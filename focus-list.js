@@ -34,14 +34,13 @@
     const current = summary?.fresh && Number.isFinite(summary.checkedAt)
       && now >= summary.checkedAt && now - summary.checkedAt <= STATUS_MAX_AGE_MS;
     if (!current) return { tone: "wait", level: "idle", label: summary ? "ข้อมูลเก่า" : "รอสแกน", detail: "ยังไม่มีสัญญาณสด", current: false };
-    const up = Math.max(0, Math.min(4, Number(summary.up) || 0));
-    const down = Math.max(0, Math.min(4, Number(summary.down) || 0));
-    const tone = up >= 3 && up > down ? "up" : down >= 3 && down > up ? "down" : "wait";
+    const tone = ["up", "down"].includes(summary.direction) ? summary.direction : "wait";
+    const tier = summary.tier === "aligned" ? "aligned" : "early";
     return {
       tone,
-      level: tone === "wait" ? "idle" : Math.max(up, down) === 4 ? "full" : "watch",
+      level: tone === "wait" ? "idle" : tier === "aligned" ? "full" : "watch",
       label: tone === "up" ? "เฝ้า CALL" : tone === "down" ? "เฝ้า PUT" : "WAIT",
-      detail: `ขึ้น ${up}/4 · ลง ${down}/4`,
+      detail: tone === "wait" ? "แท่งสั้นยังไม่ตรง" : tier === "aligned" ? "3/3 แท่งปิดตรงกัน" : "เร็ว 2/3 · 15m ยังไม่ยืนยัน",
       current: true
     };
   }

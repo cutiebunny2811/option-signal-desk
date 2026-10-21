@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -38,7 +38,7 @@
           <div class="focus-alert-heading"><span class="index">ALERTS</span><h3 id="focus-alert-title">แจ้งเตือน</h3></div>
           <button id="notify-button" class="notify-button" type="button">เปิดแจ้งเตือนเบราว์เซอร์</button>
           <p id="notify-state" class="notify-state">แจ้งในหน้านี้ได้ทันที · แจ้งเตือนเบราว์เซอร์ต้องกดอนุญาต</p>
-          <p class="notify-scope">หุ้นอื่นแจ้งเมื่อ 4/4 เปลี่ยน · จุดเข้า/SL แจ้งเฉพาะหุ้นที่เปิดดูและมีแผนล็อก</p>
+          <p class="notify-scope">หุ้นอื่นแจ้งเมื่อ 1m+5m เพิ่งตรงกัน · จุดเข้า/SL แจ้งเฉพาะหุ้นที่เปิดดูและมีแผนล็อก</p>
           <ol id="alert-list" class="alert-list"></ol>
         </section>
       </aside>
@@ -60,12 +60,12 @@
         <div class="data-status" aria-label="สถานะข้อมูล"><span id="refresh-policy">กำลังตรวจรอบรีเฟรช</span><span id="option-freshness">Option quote —</span><span id="minute-freshness">กราฟ 1m —</span></div>
 
         <section class="signal-strip" aria-labelledby="signal-title">
-          <div class="section-head"><div><span class="index">03 / MULTI-TIMEFRAME</span><h2 id="signal-title">เช็กทิศทาง 4 ช่วงเวลา</h2></div><span class="section-aside">แท่งปิด · EMA9 / EMA21 + RSI14</span></div>
+          <div class="section-head"><div><span class="index">03 / MULTI-TIMEFRAME</span><h2 id="signal-title">สัญญาณเร็ว + บริบท 1h</h2></div><span class="section-aside">แท่งปิด · EMA9 / EMA21 + RSI14</span></div>
           <div class="signal-grid" id="signal-grid"></div>
           <p class="tf-reading-note">แต่ละช่อง = ราคาปิดแท่งล่าสุดที่ปิดครบ · เวลาปิดต่างกันได้ · EMA/RSI คำนวณแยก TF · เวลาไทย</p>
           <div class="signal-verdict" id="signal-verdict"></div>
           <div class="option-signal" id="option-signal"></div>
-          <p class="fine-print">4/4 หมายถึงทิศทางราคาหุ้นตรงกัน ไม่ใช่ความน่าจะเป็นชนะหรือสัญญาณให้กดซื้อ · ข้อมูลเก่า/ตลาดปิด = WAIT</p>
+          <p class="fine-print">1m+5m สดและตรงกัน = เริ่มเฝ้าเร็ว; 15m ตรง = 3/3 หรือสวนทาง = WAIT · 1h ใช้ดูแท่งย้อนหลัง ไม่บังคับรอ · ยังไม่ใช่คำสั่งซื้อ</p>
         </section>
 
         <section class="chart-section" aria-labelledby="chart-title">
@@ -77,7 +77,7 @@
             <div class="plan-workflow waiting" id="plan-workflow"></div>
             <div class="level-grid" id="level-grid"></div>
             <p class="level-note" id="level-note">ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option</p>
-            <details class="level-method"><summary>สูตรและกติกาแผนเข้า</summary><div><p>EMA9 / EMA21 = ค่าเฉลี่ยราคาปิดที่ให้น้ำหนักแท่งใหม่มากกว่า · ATR14 = ความผันผวนเฉลี่ยจากช่วงสูง–ต่ำและช่องว่างราคา</p><p>Forecast* = ต่อความชัน EMA9 ของ 3 แท่ง 5m ล่าสุดไปอีก 15 นาที เป็นเพียงเส้นประมาณ ไม่ใช่ราคาที่คาดว่าจะเกิดจริง</p><p>Entry = ทะลุสูงสุด/ต่ำสุดของ 10 แท่ง 5m ที่ปิดแล้ว ± 0.1 ATR · SL = นอก swing 5 แท่งอย่างน้อย 0.8 ATR · R = ระยะ Entry ถึง SL · TP1 = 1R · TP2 = 1.8R</p><p>VWAP วัน = ผลรวม [(สูง+ต่ำ+ปิด)/3 × volume] ÷ ผลรวม volume ของแท่ง 1m ที่ปิดแล้ว ตั้งแต่ 9:30 น. นิวยอร์ก เฉพาะช่วงตลาดปกติ; CALL ต้องปิดเหนือ VWAP, PUT ต้องปิดต่ำกว่า VWAP ทั้งตอนล็อกแผนและแท่งยืนยันจุดเข้า หากแท่งหรือ volume ขาดให้ WAIT ไม่ใช้ค่าเดา VWAP เป็นเพียงตัวกรอง ไม่เปลี่ยน Entry/SL/TP</p><p>แผนจะล็อกเฉพาะโหมด “ตามสัญญาณ” เมื่อกราฟสด, 4/4 ตรง, VWAP ผ่าน, R ไม่เกิน 3 ATR และสัญญาที่เลือกมี quote ไม่เกิน 5 นาที, bid/ask ถูกต้อง, spread ≤10%, volume ≥10, OI ≥100 (เกณฑ์เริ่มต้น ไม่ใช่การรับประกันสภาพคล่อง) จากนั้นรอแท่ง 1m ใหม่ปิดผ่าน Entry ภายใน 30 นาที; ข้อมูลขาดช่วง, gap เลย Entry, VWAP ไม่ผ่าน หรือแท่งกำกวมจะหยุด/ข้ามแผน ไม่ไล่ราคา กด CALL/PUT เพื่อดูระดับจำลองเท่านั้น</p></div></details>
+            <details class="level-method"><summary>สูตรและกติกาแผนเข้า</summary><div><p>EMA9 / EMA21 = ค่าเฉลี่ยราคาปิดที่ให้น้ำหนักแท่งใหม่มากกว่า · ATR14 = ความผันผวนเฉลี่ยจากช่วงสูง–ต่ำและช่องว่างราคา</p><p>Forecast* = ต่อความชัน EMA9 ของ 3 แท่ง 5m ล่าสุดไปอีก 15 นาที เป็นเพียงเส้นประมาณ ไม่ใช่ราคาที่คาดว่าจะเกิดจริง</p><p>Entry = ทะลุสูงสุด/ต่ำสุดของ 10 แท่ง 5m ที่ปิดแล้ว ± 0.1 ATR · SL = นอก swing 5 แท่งอย่างน้อย 0.8 ATR · R = ระยะ Entry ถึง SL · TP1 = 1R · TP2 = 1.8R</p><p>VWAP วัน = ผลรวม [(สูง+ต่ำ+ปิด)/3 × volume] ÷ ผลรวม volume ของแท่ง 1m ที่ปิดแล้ว ตั้งแต่ 9:30 น. นิวยอร์ก เฉพาะช่วงตลาดปกติ; CALL ต้องปิดเหนือ VWAP, PUT ต้องปิดต่ำกว่า VWAP ทั้งตอนล็อกแผนและแท่งยืนยันจุดเข้า หากแท่งหรือ volume ขาดให้ WAIT ไม่ใช้ค่าเดา VWAP เป็นเพียงตัวกรอง ไม่เปลี่ยน Entry/SL/TP</p><p>แผนจะล็อกเฉพาะโหมด “ตามสัญญาณ” เมื่อแท่ง 1m+5m ปิดแล้ว สด และตรงทางกัน, 15m ไม่สวนทาง, VWAP ผ่าน, R ไม่เกิน 3 ATR และสัญญาที่เลือกมี quote ไม่เกิน 5 นาที, bid/ask ถูกต้อง, spread ≤10%, volume ≥10, OI ≥100 (เกณฑ์เริ่มต้น ไม่ใช่การรับประกันสภาพคล่อง) โดย 1h เป็นเพียงบริบทย้อนหลัง จากนั้นรอแท่ง 1m ใหม่ปิดผ่าน Entry ภายใน 30 นาที; ข้อมูลขาดช่วง, gap เลย Entry, VWAP ไม่ผ่าน หรือแท่งกำกวมจะหยุด/ข้ามแผน ไม่ไล่ราคา กด CALL/PUT เพื่อดูระดับจำลองเท่านั้น</p></div></details>
           </div>
         </section>
 
@@ -117,11 +117,12 @@
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="config.js"></script>
   <script src="price-levels.js?v=2"></script>
-  <script src="trade-plan.js?v=2"></script>
+  <script src="trade-plan.js?v=3"></script>
   <script src="chart-time.js?v=1"></script>
-  <script src="focus-list.js?v=2"></script>
+  <script src="focus-list.js?v=3"></script>
+  <script src="signal-policy.js?v=1"></script>
   <script src="session-vwap.js?v=1"></script>
   <script src="api-error.js?v=3"></script>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

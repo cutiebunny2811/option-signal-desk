@@ -8,6 +8,7 @@
   const focusList = window.OptionDeskFocus;
   const sessionVwap = window.OptionDeskSessionVwap;
   const apiError = window.OptionDeskApiError;
+  const signalPolicy = window.OptionDeskSignalPolicy;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -27,12 +28,12 @@
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {},
     lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto",
-    tradePlan: null, optionGate: null, vwapGate: null, planBlock: ""
+    tradePlan: null, optionGate: null, vwapGate: null, planBlock: "", signalAssessment: null
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
   const MINUTE_POLL_MS = 2 * 60_000;
-  const HOUR_POLL_MS = 10 * 60_000;
+  const HOUR_POLL_MS = 45 * 60_000;
   const IDLE_PAUSE_MS = 20 * 60_000;
   const FOCUS_SCAN_SPACING_MS = 45_000;
   let alertToastTimer = null;
@@ -134,6 +135,20 @@
     return { ...reference, ...technicalTrend(bars) };
   }
 
+  function hourContext(charts = state.charts) {
+    const bars = barsFor("M60", charts);
+    const lastBar = bars.at(-1), closeTime = chartTime.barEndMs(lastBar, "M60");
+    if (!lastBar || !closeTime || Date.now() - closeTime > 7 * 24 * 60 * 60_000) {
+      return { lastBar, closeTime, direction: "wait", label: "ไม่มีบริบท", detail: "แท่ง 1h เก่ามากหรือไม่มีข้อมูล" };
+    }
+    const raw = bars.length >= 25 ? technicalTrend(bars) : signalPolicy.priceActionContext(bars);
+    return {
+      lastBar, closeTime, direction: raw.direction,
+      label: raw.direction === "up" ? "ขึ้นเดิม" : raw.direction === "down" ? "ลงเดิม" : "แกว่ง",
+      detail: `${raw.detail} · บริบทเท่านั้น ไม่ใช้ยืนยันจุดเข้า`
+    };
+  }
+
   function focusStorageKey(kind) { return `option-desk:${kind}:v1:${state.user?.id || "demo"}`; }
 
   function loadFocusPreferences() {
@@ -161,14 +176,11 @@
   }
 
   function focusSummary(charts) {
-    const trends = ["M1", "M5", "M15", "M60"].map((frame) => trendFor(frame, charts));
-    const up = trends.filter((item) => item.direction === "up").length;
-    const down = trends.filter((item) => item.direction === "down").length;
-    const fresh = trends.every((item) => item.usable && !item.stale && !item.closed);
+    const trends = Object.fromEntries(["M1", "M5", "M15"].map((frame) => [frame, trendFor(frame, charts)]));
+    const assessment = signalPolicy.assess(trends, marketOpenNow());
     return {
-      direction: fresh && up === 4 ? "up" : fresh && down === 4 ? "down" : "wait",
-      fresh, up, down, price: trends[0].lastBar?.close ?? null,
-      asOf: trends[0].closeTime || 0, checkedAt: Date.now()
+      ...assessment, price: trends.M1.lastBar?.close ?? null,
+      asOf: trends.M1.closeTime || 0, checkedAt: Date.now()
     };
   }
 
@@ -180,7 +192,7 @@
       const display = focusList.presentation(signal, { marketOpen, now });
       return `<div class="focus-row ${display.tone} ${display.level} ${symbol === state.symbol ? "active" : ""}"><button class="focus-open" type="button" data-symbol="${esc(symbol)}" aria-pressed="${symbol === state.symbol}"><strong class="focus-ticker">${esc(symbol)}</strong><span class="focus-price">${display.current ? money(signal?.price) : "—"}</span><span class="focus-signal"><b class="focus-label">${esc(display.label)}</b><i class="focus-led" aria-hidden="true"></i></span><small class="focus-detail">${esc(display.detail)}</small></button><button class="focus-remove" type="button" data-remove-symbol="${esc(symbol)}" aria-label="ลบ ${esc(symbol)} จากหุ้นเฝ้าเทรด" title="ลบจากหุ้นเฝ้าเทรด">×</button></div>`;
     }).join("") : `<p class="empty-list">ยังไม่มีหุ้นเฝ้าเทรด · เพิ่ม ticker ด้านบน</p>`;
-    $("#focus-scan-note").textContent = `${state.focusSymbols.length}/${focusList.MAX_SYMBOLS} ตัว · 3/4 เริ่มเฝ้า · 4/4 ทิศทางครบ ไม่ใช่จุดซื้อ · สแกนเมื่อหน้าและตลาดเปิด`;
+    $("#focus-scan-note").textContent = `${state.focusSymbols.length}/${focusList.MAX_SYMBOLS} ตัว · 1m+5m เริ่มเฝ้า · 15m ช่วยยืนยัน · 1h เป็นบริบท ไม่ใช่จุดซื้อ`;
   }
 
   function renderAlerts() {
@@ -217,13 +229,13 @@
     const direction = focusList.transition(previous, summary);
     if (direction && marketOpenNow() && !demo) {
       const side = direction === "up" ? "CALL" : "PUT";
-      emitAlert(`watch:${symbol}:${side}:${summary.asOf}`, symbol, `${symbol} · เริ่มเฝ้า ${side}`, `ทิศทางแท่งปิดตรงกัน 4/4 · ยังไม่ใช่จุดเข้า · ตรวจ Option และแผนก่อน`);
+      emitAlert(`watch:${symbol}:${side}:${summary.asOf}`, symbol, `${symbol} · เริ่มเฝ้า ${side}`, `${summary.tier === "aligned" ? "แท่งปิด 1m/5m/15m ตรงกัน" : "สัญญาณเร็วจากแท่งปิด 1m+5m"} · 1h เป็นบริบท · ยังไม่ใช่จุดเข้า ตรวจ Option และแผนก่อน`);
     }
     renderWatchlist();
   }
 
   function updateFocusFromSelected() {
-    if (state.focusSymbols.includes(state.symbol) && state.charts.M1 && state.charts.M60) updateFocusSignal(state.symbol, focusSummary(state.charts));
+    if (state.focusSymbols.includes(state.symbol) && state.charts.M1) updateFocusSignal(state.symbol, focusSummary(state.charts));
   }
 
   function renderHeader() {
@@ -245,30 +257,34 @@
   }
 
   function renderSignals() {
-    const frames = [["M1", "1m"], ["M5", "5m"], ["M15", "15m"], ["M60", "1h"]];
-    const trends = frames.map(([frame, label]) => ({ ...trendFor(frame), frame, frameLabel: label }));
-    $("#signal-grid").innerHTML = trends.map((trend) => `<div class="signal-card"><small>${trend.frameLabel} · แท่งปิด</small><div class="signal-primary"><strong class="${trend.direction}">${trend.label}</strong><b>${money(trend.lastBar?.close)}</b></div>${trend.closeTime ? `<time datetime="${new Date(trend.closeTime).toISOString()}">ปิด ${chartTime.formatBangkok(trend.closeTime / 1000)}</time>` : `<span class="signal-time">รอแท่งปิด</span>`}<span>${esc(trend.detail)}</span></div>`).join("");
-    const up = trends.filter((trend) => trend.direction === "up").length;
-    const down = trends.filter((trend) => trend.direction === "down").length;
-    const loaded = trends.filter((trend) => trend.usable).length;
-    const stale = trends.filter((trend) => trend.stale).length;
+    const short = Object.fromEntries(["M1", "M5", "M15"].map((frame) => [frame, trendFor(frame)]));
+    const assessment = signalPolicy.assess(short, marketOpenNow());
+    state.signalAssessment = assessment;
+    const trends = [["M1", "1m", short.M1], ["M5", "5m", short.M5], ["M15", "15m", short.M15], ["M60", "1h", hourContext()]];
+    $("#signal-grid").innerHTML = trends.map(([frame, label, trend]) => `<div class="signal-card ${frame === "M60" ? "context" : ""}"><small>${label} · ${frame === "M60" ? "บริบทย้อนหลัง" : "แท่งปิด"}</small><div class="signal-primary"><strong class="${trend.direction}">${trend.label}</strong><b>${money(trend.lastBar?.close)}</b></div>${trend.closeTime ? `<time datetime="${new Date(trend.closeTime).toISOString()}">ปิด ${chartTime.formatBangkok(trend.closeTime / 1000)}</time>` : `<span class="signal-time">รอแท่งปิด</span>`}<span>${esc(trend.detail)}</span></div>`).join("");
     const verdict = $("#signal-verdict");
     let message = "รอข้อมูลกราฟ", detail = "ยังประเมินแนวโน้มไม่ได้", tone = "wait";
-    if (!marketOpenNow()) { message = "ตลาดสหรัฐฯ ปิด"; detail = "สัญญาณ 4 ช่วงเวลาจะคอนเฟิร์มเฉพาะช่วงตลาดเปิด"; }
-    else if (stale > 0) { message = "รอแท่งราคาใหม่"; detail = `${stale} ช่วงเวลาเก่า · ไม่ใช้ยืนยันสัญญาณ`; }
-    else if (loaded === 4 && up === 4) { message = "แนวโน้มขึ้นตรงกัน 4/4"; detail = "เฝ้าดู CALL · ยังต้องเช็กจุดเข้าและสัญญา"; tone = "up"; }
-    else if (loaded === 4 && down === 4) { message = "แนวโน้มลงตรงกัน 4/4"; detail = "เฝ้าดู PUT · ยังต้องเช็กจุดเข้าและสัญญา"; tone = "down"; }
-    else if (loaded > 0) { message = "ยังไม่คอนเฟิร์ม"; detail = `${up} ขึ้น · ${down} ลง · ${4 - up - down} รอ`; }
+    if (!marketOpenNow()) { message = "ตลาดสหรัฐฯ ปิด"; detail = "แสดงแท่งย้อนหลังเป็นบริบท · ไม่แจ้งสัญญาณเข้าใหม่"; }
+    else if (assessment.direction !== "wait") {
+      tone = assessment.direction;
+      message = `${assessment.tier === "aligned" ? "ทิศทางตรงกัน 3/3" : "สัญญาณเร็ว 1m+5m"} · เฝ้า ${tone === "up" ? "CALL" : "PUT"}`;
+      detail = `${assessment.tier === "aligned" ? "15m ยืนยันแล้ว" : "15m ยังไม่ยืนยัน แต่ไม่สวนทาง"} · 1h เป็นบริบท · ยังไม่ใช่จุดเข้า`;
+    } else if (assessment.opposed) { message = "15m สวนทาง"; detail = "1m+5m ตรงกัน แต่ 15m คัดค้าน · รอจังหวะใหม่"; }
+    else if (!assessment.fresh) { message = "รอแท่งสั้นใหม่"; detail = "ต้องมี 1m และ 5m ที่ปิดแล้วและข้อมูลสด · ไม่รอ 1h"; }
+    else { message = "ทิศทางยังไม่ตรง"; detail = "1m+5m ยังไม่ไปทางเดียวกัน · 1h ใช้ดูบริบทเท่านั้น"; }
     verdict.className = `signal-verdict ${tone}`;
     verdict.innerHTML = `<span>${message}</span><small>${detail}</small>`;
     const quoteFresh = (side) => {
       const quoteTimes = contracts(side).map((item) => new Date(item.quote_time).getTime()).filter(Number.isFinite);
       return quoteTimes.length > 0 && Date.now() - Math.max(...quoteTimes) < 5 * 60_000;
     };
-    const callReady = tone === "up" && quoteFresh("call");
-    const putReady = tone === "down" && quoteFresh("put");
+    const callWatch = assessment.direction === "up";
+    const putWatch = assessment.direction === "down";
+    const callReady = callWatch && quoteFresh("call");
+    const putReady = putWatch && quoteFresh("put");
     state.planDirection = callReady ? "up" : putReady ? "down" : "wait";
-    $("#option-signal").innerHTML = `<div class="option-lane ${callReady ? "active call" : ""}"><span>CALL / ฝั่งขึ้น</span><strong>${callReady ? "ทิศทางผ่าน" : "WAIT"}</strong><small>${callReady ? "4/4 · ยังไม่ใช่จุดเข้า" : "ยังไม่ครบเงื่อนไข"}</small></div><div class="option-lane ${putReady ? "active put" : ""}"><span>PUT / ฝั่งลง</span><strong>${putReady ? "ทิศทางผ่าน" : "WAIT"}</strong><small>${putReady ? "4/4 · ยังไม่ใช่จุดเข้า" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+    const lane = (side, watch, ready) => `<div class="option-lane ${watch ? `${side} ${ready ? "active" : "watch"}` : ""}"><span>${side.toUpperCase()} / ฝั่ง${side === "call" ? "ขึ้น" : "ลง"}</span><strong>${ready ? "ทิศทางผ่าน" : watch ? "เฝ้าดู" : "WAIT"}</strong><small>${ready ? `${assessment.tier === "aligned" ? "3/3" : "เร็ว 2/3"} · Quote สด · ยังไม่ใช่จุดเข้า` : watch ? "ทิศทางหุ้นมีแล้ว · รอ Option quote" : "ยังไม่ครบเงื่อนไข"}</small></div>`;
+    $("#option-signal").innerHTML = lane("call", callWatch, callReady) + lane("put", putWatch, putReady);
   }
 
   function tradingDate(now = Date.now()) {
@@ -352,7 +368,8 @@
     const fifteen = technicalTrend(barsFor("M15")).direction;
     const watchDirection = five === fifteen && five !== "wait" ? five : "wait";
     const direction = state.levelSide === "call" ? "up" : state.levelSide === "put" ? "down"
-      : state.planDirection !== "wait" ? state.planDirection : watchDirection;
+      : state.planDirection !== "wait" ? state.planDirection
+      : ["up", "down"].includes(state.signalAssessment?.direction) ? state.signalAssessment.direction : watchDirection;
     const tracked = state.levelSide === "auto" ? state.tradePlan : null;
     const plan = tracked || (recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null);
     const livePlan = Boolean(tracked && ["armed", "triggered", "tp1"].includes(tracked.status) && fresh);
@@ -378,7 +395,9 @@
       detail = `แท่ง 1m ปิดผ่าน ${money(tracked.entry)} และ VWAP ${money(tracked.vwapAtTrigger)} ณ ${bkkTime(tracked.triggeredAt || tracked.statusAt)} · ${tracked.status === "tp1" ? "แตะ TP1 แล้ว · " : ""}${quote ? `Option bid/ask ตอนตรวจพบ ${money(quote.bid)} / ${money(quote.ask)} (quote ${bkkTime(quote.quoteAt)}) · ` : ""}ตรวจราคาใน broker ก่อนตัดสินใจ`;
     } else if (tracked) detail = `${tracked.reason || "แผนสิ้นสุด"} · ${bkkTime(tracked.statusAt)}`;
     else if (!marketOpenNow()) detail = "ตลาดปิด · ไม่สร้างสัญญาณเข้าใหม่";
-    else if (state.planDirection === "wait") detail = "รอ 1m / 5m / 15m / 1h ตรงกัน 4/4 และข้อมูลสด";
+    else if (state.planDirection === "wait") detail = ["up", "down"].includes(state.signalAssessment?.direction)
+      ? "หุ้นมีสัญญาณระยะสั้นแล้ว · รอ Option quote สดและเลือกสัญญาก่อนล็อกแผน"
+      : "รอแท่ง 1m+5m ปิดแล้วสดและทิศทางตรงกัน · 15m ห้ามสวนทาง · 1h ใช้ดูบริบท";
     else if (state.optionGate && !state.optionGate.ok) detail = `เลือกสัญญา${state.planDirection === "up" ? " CALL" : " PUT"} ที่ผ่านเกณฑ์ · ${state.optionGate.reasons.join(" · ")}`;
     else detail = state.planBlock || "รอข้อมูลกราฟ 1m / 5m ที่ปิดครบและสด";
     const contractName = (manual ? state.tradePlan : tracked)?.contractSymbol || state.optionGate?.symbol || "ยังไม่พร้อม";
@@ -386,7 +405,9 @@
     const vwapLabel = Number.isFinite(tracked?.vwapAtTrigger) ? `ผ่านตอนเข้า · ${money(vwapValue)}`
       : state.vwapGate?.ready ? `${state.vwapGate.ok ? "ผ่าน" : "รอ"} · ${money(vwapValue)}` : "รอข้อมูล";
     box.className = `plan-workflow ${!manual && active ? tone : "waiting"}`;
-    box.innerHTML = `<div class="workflow-heading"><span class="index">ENTRY WORKFLOW / ราคาหุ้น</span><strong>${esc(title)}</strong></div><p>${esc(detail)}</p><div class="workflow-meta"><span>สัญญา <b>${esc(contractName)}</b></span><span>4/4 <b>${state.planDirection !== "wait" ? "ผ่าน" : "รอ"}</b></span><span>Quote / spread <b>${state.optionGate?.ok ? "ผ่านเกณฑ์" : "รอ/ไม่ผ่าน"}</b></span><span>VWAP วัน <b>${esc(vwapLabel)}</b></span><span>สถานะ <b>${manual ? "ดูจำลอง" : tracked ? active ? "ล็อกระดับ" : "สิ้นสุด" : "ยังไม่ล็อก"}</b></span></div><small>VWAP กรองจุดเข้าเท่านั้น ไม่ขยับ Entry/SL/TP · ระดับทั้งหมดคือราคาหุ้น ไม่ใช่ราคา Option หรือคำสั่งซื้อ</small>`;
+    const trendLabel = ["up", "down"].includes(state.signalAssessment?.direction)
+      ? state.signalAssessment?.tier === "aligned" ? "3/3 ตรง" : "2/3 เร็ว" : "รอ";
+    box.innerHTML = `<div class="workflow-heading"><span class="index">ENTRY WORKFLOW / ราคาหุ้น</span><strong>${esc(title)}</strong></div><p>${esc(detail)}</p><div class="workflow-meta"><span>สัญญา <b>${esc(contractName)}</b></span><span>TF สั้น <b>${trendLabel}</b></span><span>Quote / spread <b>${state.optionGate?.ok ? "ผ่านเกณฑ์" : "รอ/ไม่ผ่าน"}</b></span><span>VWAP วัน <b>${esc(vwapLabel)}</b></span><span>สถานะ <b>${manual ? "ดูจำลอง" : tracked ? active ? "ล็อกระดับ" : "สิ้นสุด" : "ยังไม่ล็อก"}</b></span></div><small>1h เป็นบริบท ไม่ใช่ด่านรอ · VWAP กรองจุดเข้า ไม่ขยับ Entry/SL/TP · ระดับเป็นราคาหุ้น ไม่ใช่ราคา Option หรือคำสั่งซื้อ</small>`;
   }
 
   function renderLevels() {
@@ -685,9 +706,9 @@
         renderWatchlist();
         return;
       }
-      const [minute, hour] = await Promise.all([getChart(instrumentId, "M1", symbol), getChart(instrumentId, "M60", symbol)]);
-      const summary = focusSummary({ M1: minute, M60: hour });
-      if (minute?.refresh_error || hour?.refresh_error) summary.error = minute?.refresh_error || hour?.refresh_error;
+      const minute = await getChart(instrumentId, "M1", symbol);
+      const summary = focusSummary({ M1: minute });
+      if (minute?.refresh_error) summary.error = minute.refresh_error;
       updateFocusSignal(symbol, summary);
     } catch (error) {
       if (apiError.isRateLimited(error)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
@@ -696,13 +717,25 @@
     } finally { state.focusScanBusy = false; }
   }
 
+  async function loadHourContext(symbol, instrumentId) {
+    if (!instrumentId) return;
+    state.lastChartAttemptAt.M60 = Date.now();
+    try {
+      const hour = await getChart(instrumentId, "M60", symbol);
+      if (state.symbol !== symbol || state.instrumentId !== instrumentId) return;
+      state.charts.M60 = hour;
+      renderSignals();
+      if (state.chartFrame === "M60") renderChart();
+    } catch (_) { /* Historical 1h context is optional; short-frame signal remains available. */ }
+  }
+
   async function loadSymbol(symbol, { expiry = "", refresh = false, options = true, chartFrames = null, background = false } = {}) {
     const normalized = String(symbol || "").trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) { setStatus("กรอก ticker หุ้นสหรัฐให้ถูกต้อง", true); return; }
     if (state.busy && background) return;
     const requestId = ++state.requestId;
     const symbolChanged = normalized !== state.symbol;
-    const frames = symbolChanged ? ["M1", "M60"] : Array.isArray(chartFrames) ? chartFrames : refresh ? ["M1", "M60"] : [];
+    const frames = symbolChanged ? ["M1"] : Array.isArray(chartFrames) ? chartFrames : refresh ? ["M1"] : [];
     state.symbol = normalized;
     state.busy = true;
     state.lastError = "";
@@ -744,7 +777,13 @@
       if (apiError.isRateLimited(error)) state.quotaPauseUntil = Date.now() + 10 * 60_000;
       setStatus(error.message || "อ่านข้อมูลไม่สำเร็จ", true);
     } finally {
-      if (requestId === state.requestId) { state.busy = false; updateFocusFromSelected(); renderAll(); }
+      if (requestId === state.requestId) {
+        state.busy = false;
+        updateFocusFromSelected();
+        renderAll();
+        if ((symbolChanged || refresh && Date.now() - (state.lastChartAttemptAt.M60 || 0) >= HOUR_POLL_MS)
+          && !frames.includes("M60")) void loadHourContext(normalized, state.instrumentId);
+      }
     }
   }
 
@@ -904,7 +943,7 @@
     const needOptions = now - state.lastOptionAttemptAt >= OPTION_POLL_MS;
     const frames = [];
     if (now - (state.lastChartAttemptAt.M1 || 0) >= MINUTE_POLL_MS) frames.push("M1");
-    if (now - (state.lastChartAttemptAt.M60 || 0) >= HOUR_POLL_MS) frames.push("M60");
+    if (now - (state.lastChartAttemptAt.M60 || 0) >= HOUR_POLL_MS) void loadHourContext(state.symbol, state.instrumentId);
     if (needOptions || frames.length) await loadSymbol(state.symbol, { expiry: state.expiry, options: needOptions, chartFrames: frames, background: true });
     await maybeScanFocus();
   }
