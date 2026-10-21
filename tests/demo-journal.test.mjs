@@ -47,3 +47,32 @@ test("CSV escapes notes and exports calculated net only for active rows", () => 
   assert.match(output, /"plan ""A"", wait"/);
   assert.equal(output.split("\r\n").length, 2);
 });
+
+test("history pages all 100+ trades without truncating statistics or CSV", () => {
+  const rows = Array.from({ length: 103 }, (_, index) => ({
+    ...journal.validate(trade({ contract_label: `${index % 2 ? "NVDA" : "QQQ"} ${700 + index} CALL`, underlying_symbol: index % 2 ? "NVDA" : "QQQ" })),
+    id: `row-${index}`, closed_at: new Date(Date.UTC(2026, 9, 21, 12, index)).toISOString()
+  }));
+  const first = journal.pageRows(rows, { pageSize: 10 });
+  assert.equal(first.total, 103);
+  assert.equal(first.pages, 11);
+  assert.equal(first.rows.length, 10);
+  assert.equal(first.rows[0].id, "row-102");
+  const last = journal.pageRows(rows, { page: 50, pageSize: 10 });
+  assert.equal(last.page, 10);
+  assert.equal(last.rows.length, 3);
+  assert.equal(last.rows.at(-1).id, "row-0");
+  assert.equal(journal.summarize(rows).count, 103);
+  assert.equal(journal.csv(rows).split("\r\n").length, 104);
+});
+
+test("history search and followed filter apply before pagination", () => {
+  const rows = [
+    { ...journal.validate(trade({ contract_label: "QQQ 724 CALL" })), id: "qqq" },
+    { ...journal.validate(trade({ contract_label: "NVDA 220 PUT", underlying_symbol: "NVDA", followed_signal: false })), id: "nvda" },
+    { ...journal.validate(trade({ contract_label: "QQQ 725 CALL" })), id: "void", voided_at: "2026-10-21T15:00:00Z" }
+  ];
+  assert.equal(journal.pageRows(rows, { query: "nvda" }).total, 0);
+  assert.equal(journal.pageRows(rows, { followedOnly: false, query: "nvda" }).rows[0].id, "nvda");
+  assert.equal(journal.pageRows(rows, { query: "724" }).rows[0].id, "qqq");
+});

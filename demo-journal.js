@@ -48,6 +48,19 @@
     };
   }
 
+  function pageRows(rows, { followedOnly = true, query = "", page = 0, pageSize = 10 } = {}) {
+    const term = String(query).trim().toUpperCase();
+    const size = Math.max(1, Math.floor(Number(pageSize) || 10));
+    const visible = (Array.isArray(rows) ? rows : [])
+      .filter((row) => !row.voided_at && (!followedOnly || row.followed_signal))
+      .filter((row) => !term || `${row.underlying_symbol || ""} ${row.contract_label || ""} ${row.option_side || ""}`.toUpperCase().includes(term))
+      .sort((a, b) => Date.parse(b.closed_at) - Date.parse(a.closed_at));
+    const pages = Math.max(1, Math.ceil(visible.length / size));
+    const currentPage = Math.min(Math.max(0, Math.floor(Number(page) || 0)), pages - 1);
+    const start = currentPage * size;
+    return { rows: visible.slice(start, start + size), total: visible.length, page: currentPage, pages, start };
+  }
+
   function validate(input) {
     const contractLabel = String(input.contract_label || "").trim().replace(/\s+/g, " ");
     const symbol = String(input.underlying_symbol || "").trim().toUpperCase();
@@ -86,7 +99,7 @@
       try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value.filter((row) => row?.user_id === user.id && typeof row.id === "string") : []; }
       catch (_) { return []; }
     };
-    const state = { rows: readLocal(), mode: "loading", filter: "followed", saving: false };
+    const state = { rows: readLocal(), mode: "loading", filter: "followed", query: "", page: 0, expanded: new Set(), saving: false };
     current = state;
     const find = (selector) => root.querySelector(selector);
     const saveLocal = () => { try { localStorage.setItem(key, JSON.stringify(state.rows)); return true; } catch (_) { return false; } };
@@ -101,12 +114,18 @@
         button.classList.toggle("active", selected);
         button.setAttribute("aria-pressed", String(selected));
       }
-      const visible = state.rows.filter((row) => !row.voided_at && (!followedOnly || row.followed_signal)).sort((a, b) => Date.parse(b.closed_at) - Date.parse(a.closed_at));
-      find("#demo-list").innerHTML = visible.length ? visible.slice(0, 100).map((row) => {
+      const listing = pageRows(state.rows, { followedOnly, query: state.query, page: state.page });
+      state.page = listing.page;
+      find("#demo-list").innerHTML = listing.rows.length ? listing.rows.map((row) => {
         const { net, heldMs } = result(row);
-        return `<article class="demo-row"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>${dollars(row.buy_total)} <span>→</span> ${dollars(row.sell_total)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></article>`;
-      }).join("") : `<p class="demo-empty">ยังไม่มีรายการที่ปิดแล้วในมุมมองนี้ · กด “จด Demo trade” เพื่อเริ่มเก็บผลจริงจากพอร์ตทดลอง</p>`;
-      find("#demo-list-count").textContent = visible.length > 100 ? `แสดง 100 จาก ${visible.length} รายการ · CSV มีครบ` : `${visible.length} รายการ`;
+        const expanded = state.expanded.has(row.id);
+        return `<article class="demo-row${expanded ? " is-expanded" : ""}"><button type="button" class="demo-mobile-summary" data-demo-expand="${html(row.id)}" aria-expanded="${expanded}" aria-controls="demo-more-${html(row.id)}"><span class="demo-mobile-contract"><strong>${html(row.contract_label)}</strong><small>${dateTime(row.closed_at)} · ${row.contracts} สัญญา</small></span><span class="demo-mobile-result"><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong><small>รายละเอียด ${expanded ? "−" : "+"}</small></span></button><div class="demo-row-more" id="demo-more-${html(row.id)}"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>${dollars(row.buy_total)} <span>→</span> ${dollars(row.sell_total)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></div></article>`;
+      }).join("") : `<p class="demo-empty">${state.query ? "ไม่พบรายการที่ตรงกับคำค้น · ลอง ticker หรือ strike อื่น" : "ยังไม่มีรายการที่ปิดแล้วในมุมมองนี้ · กด “จด Demo trade” เพื่อเริ่มเก็บผลจริงจากพอร์ตทดลอง"}</p>`;
+      find("#demo-list-count").textContent = listing.total ? `${listing.start + 1}–${listing.start + listing.rows.length} จาก ${listing.total} รายการ` : "0 รายการ";
+      find("#demo-pagination").hidden = listing.pages <= 1;
+      find("#demo-page-status").textContent = `หน้า ${listing.page + 1}/${listing.pages}`;
+      find("#demo-page-prev").disabled = listing.page === 0;
+      find("#demo-page-next").disabled = listing.page >= listing.pages - 1;
       find("#demo-storage").textContent = state.mode === "remote" ? "ซิงก์ Supabase" : state.mode === "loading" ? "กำลังตรวจที่เก็บ" : "เก็บในเครื่อง · สำรอง CSV";
     }
 
@@ -254,9 +273,25 @@
       const button = event.target.closest("[data-demo-filter]");
       if (!button) return;
       state.filter = button.dataset.demoFilter;
+      state.page = 0;
+      state.expanded.clear();
       render();
     };
+    find("#demo-search").oninput = (event) => { state.query = event.target.value; state.page = 0; state.expanded.clear(); render(); };
+    for (const [selector, direction] of [["#demo-page-prev", -1], ["#demo-page-next", 1]]) {
+      find(selector).onclick = () => { state.page += direction; state.expanded.clear(); render(); find("#demo-list-head").scrollIntoView({ behavior: "smooth", block: "start" }); };
+    }
     find("#demo-list").onclick = (event) => {
+      const expand = event.target.closest("[data-demo-expand]");
+      if (expand) {
+        const id = expand.dataset.demoExpand;
+        const expanded = !state.expanded.has(id);
+        if (expanded) state.expanded.add(id); else state.expanded.delete(id);
+        expand.setAttribute("aria-expanded", String(expanded));
+        expand.querySelector(".demo-mobile-result small").textContent = `รายละเอียด ${expanded ? "−" : "+"}`;
+        expand.closest(".demo-row").classList.toggle("is-expanded", expanded);
+        return;
+      }
       const edit = event.target.closest("[data-demo-edit]");
       if (edit) { const row = state.rows.find((item) => item.id === edit.dataset.demoEdit); if (row) openForm(row); return; }
       const remove = event.target.closest("[data-demo-void]");
@@ -297,6 +332,8 @@
       if (!localSaved) status("บันทึกในเครื่องไม่สำเร็จ · โปรดส่งออก CSV ก่อนออกจากหน้า", true);
       form.hidden = true;
       if (!values.followed_signal) state.filter = "all";
+      state.page = 0;
+      state.expanded.clear();
       setImportVisible(false);
       imageFiles.buy = null; imageFiles.sell = null;
       for (const side of ["buy", "sell"]) {
@@ -316,5 +353,5 @@
   }
 
   function unmount() { current = null; }
-  return { duration, result, summarize, validate, csv, mount, unmount };
+  return { duration, result, summarize, pageRows, validate, csv, mount, unmount };
 });

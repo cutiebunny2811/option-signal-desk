@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -120,8 +120,9 @@
             <label class="demo-follow"><input name="followed_signal" type="checkbox"><span>รายการนี้เข้าตามสัญญาณแอป <small>ติ๊กจากการเทรดจริงของคุณ ไม่ใช่ระบบยืนยันผลให้อัตโนมัติ</small></span></label>
             <div class="demo-form-actions"><button type="button" class="quiet-button" id="demo-cancel">ยกเลิก</button><button type="submit" class="demo-primary">บันทึกรายการ</button></div>
           </form>
-          <div class="demo-list-head"><div class="segmented" id="demo-filters" role="group" aria-label="กรองรายการ Demo"><button type="button" data-demo-filter="followed" class="active" aria-pressed="true">ตามแอป</button><button type="button" data-demo-filter="all" aria-pressed="false">ทั้งหมด</button></div><span id="demo-list-count">0 รายการ</span></div>
+          <div class="demo-list-head" id="demo-list-head"><div class="segmented" id="demo-filters" role="group" aria-label="กรองรายการ Demo"><button type="button" data-demo-filter="followed" class="active" aria-pressed="true">ตามแอป</button><button type="button" data-demo-filter="all" aria-pressed="false">ทั้งหมด</button></div><label class="demo-search"><span class="sr-only">ค้นหาสัญญาในประวัติ Demo</span><input id="demo-search" type="search" placeholder="ค้นหา ticker / strike" autocomplete="off" aria-label="ค้นหาสัญญาในประวัติ Demo"></label><span id="demo-list-count">0 รายการ</span></div>
           <div id="demo-list" class="demo-list"></div>
+          <nav class="demo-pagination" id="demo-pagination" aria-label="หน้าประวัติ Demo" hidden><button type="button" id="demo-page-prev">← ก่อนหน้า</button><span id="demo-page-status" aria-live="polite">หน้า 1/1</span><button type="button" id="demo-page-next">ถัดไป →</button></nav>
           <p class="fine-print">Win rate นี้นับเฉพาะรายการที่จดว่าปิดแล้วและมีกำไร/ขาดทุน ไม่ใช่ความแม่นของทุกสัญญาณที่แอปเคยเตือน · P/L = ยอดขายรวม − ยอดซื้อรวม − ค่าธรรมเนียมที่กรอก · ยังไม่รวมค่าธรรมเนียมที่ไม่ได้กรอก</p>
         </section>
       </main>
@@ -161,7 +162,7 @@
   <script src="session-vwap.js?v=1"></script>
   <script src="api-error.js?v=3"></script>
   <script src="demo-image-import.js?v=1"></script>
-  <script src="demo-journal.js?v=2"></script>
-  <script src="app.js?v=22"></script>
+  <script src="demo-journal.js?v=3"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>
