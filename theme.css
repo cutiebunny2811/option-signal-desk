@@ -3,7 +3,7 @@
   --bg: #071417;
   --surface: #0b2024;
   --surface-2: #10292e;
-  --surface-3: #17363a;
+  --surface-3: #12484c;
   --text: #e2e2e0;
   --muted: #b4c6c5;
   --faint: #88a3a4;
@@ -19,7 +19,7 @@
 body,
 .main-panel,
 .demo-journal { background: var(--bg); }
-.topbar { background: #0b2024; border-color: var(--line); }
+.topbar { background: #0e2931; border-color: var(--line); }
 .watch-panel,
 .contract-panel { background: #0a1c20; }
 .index { color: #80cbc4; }
@@ -36,7 +36,7 @@ body,
 .demo-pagination button,
 .demo-import-close { border-radius: 9px; }
 .quiet-button { background: #10262a; }
-.quiet-button:hover { background: #163338; }
+.quiet-button:hover { background: var(--surface-3); }
 .symbol-form,
 .focus-form,
 .search-field,
