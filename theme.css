@@ -5,12 +5,12 @@
   --surface-2: #10292e;
   --surface-3: #12484c;
   --text: #e2e2e0;
-  --muted: #b4c6c5;
-  --faint: #88a3a4;
+  --muted: #bdc6c5;
+  --faint: #96a3a3;
   --line: #28484e;
   --line-soft: #1c383e;
   --gold: #2b7574;
-  --gold-hi: #79dcd0;
+  --gold-hi: #e2e2e0;
   --ruby: #861211;
   --ruby-hi: #f07372;
   --green: #53ddb0;
@@ -22,7 +22,7 @@ body,
 .topbar { background: #0e2931; border-color: var(--line); }
 .watch-panel,
 .contract-panel { background: #0a1c20; }
-.index { color: #80cbc4; }
+.index { color: var(--text); }
 .brand { gap: 10px; }
 .brand-icon,
 .auth-icon { display: block; object-fit: cover; flex: none; border-radius: 11px; box-shadow: 0 0 0 1px #336067; }
@@ -73,6 +73,8 @@ body,
 .signal-card.context,
 .signal-card.context:has(.up),
 .signal-card.context:has(.down) { background: #162b2d; border-top-color: #64aaa5; }
+.signal-card.context strong.up,
+.signal-card.context strong.down { color: var(--text); }
 .signal-verdict,
 .option-lane,
 .plan-workflow { border-radius: 10px; }
@@ -97,7 +99,7 @@ body,
 .oi-summary { background: #0d2428; }
 .oi-table th { background: #143035; }
 .oi-table .near td { background: #173b3a; }
-.oi-table .strike { color: #95e2d4; }
+.oi-table .strike { color: var(--text); }
 .oi-table tr:hover td { background: #153338; }
 
 /* Focus list and contract selector read as individual touch targets. */
@@ -106,9 +108,10 @@ body,
 .focus-row.up { background: #0f2c28; }
 .focus-row.down { background: #321d21; }
 .focus-row.active { outline: none; border-color: #5db9ad; border-left-color: var(--focus-accent); }
-.focus-row.active.wait { background: #173136; }
+.focus-row.active.wait { background: #173136; border-color: var(--line); border-left-color: var(--focus-accent); }
 .contract-row.active,
 .watch-item.active { background: #17373b; border-left-color: #70c9c0; }
+.contract-row.active { border-left-color: var(--text); }
 .focus-row:hover,
 .contract-row:hover,
 .watch-item:hover { background: #173438; }
