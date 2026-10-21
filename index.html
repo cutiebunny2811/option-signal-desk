@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <div class="app-shell" id="app-shell" hidden>
@@ -52,6 +52,7 @@
           </div>
           <div class="head-actions">
             <form id="symbol-form" class="symbol-form"><label class="sr-only" for="symbol-input">สัญลักษณ์หุ้น</label><input id="symbol-input" name="symbol" maxlength="10" placeholder="Ticker เช่น NVDA" spellcheck="false" autocomplete="off" required><button type="submit">ดูหุ้น</button></form>
+            <button type="button" class="quiet-button demo-shortcut" id="demo-shortcut">+ จด Demo</button>
             <button type="button" class="quiet-button refresh-button" id="refresh-button">↻ รีเฟรช</button>
           </div>
         </section>
@@ -86,6 +87,33 @@
           <div class="oi-summary" id="oi-summary"></div>
           <div class="oi-table-wrap"><table class="oi-table"><thead><tr><th>CALL OI</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>STRIKE</th><th class="bar-heading" colspan="2">ความหนาแน่น</th><th>PUT OI</th></tr></thead><tbody id="oi-rows"></tbody></table></div>
           <p class="fine-print">แสดงเฉพาะสัญญาใกล้ราคา สูงสุด 20 strike ต่อฝั่ง · OI เป็นยอดจากการประมวลผลสิ้นวัน ไม่ใช่ค่าที่วิ่งตาม quote และยังไม่มีประวัติเทียบวันก่อน</p>
+        </section>
+
+        <section class="demo-journal" id="demo-journal" aria-labelledby="demo-journal-title">
+          <div class="section-head demo-head"><div><span class="index">07 / DEMO JOURNAL</span><h2 id="demo-journal-title">จดผลเทรดทดลอง</h2><p>รายการ Option ที่ปิดแล้ว · ยอดซื้อ–ขายรวมจริง ไม่ใช่ราคา premium ต่อหุ้น</p></div><div class="demo-head-actions"><button type="button" class="quiet-button" id="demo-export">ส่งออก CSV</button><button type="button" class="demo-primary" id="demo-add">+ จด Demo trade</button></div></div>
+          <div class="demo-status-line"><span id="demo-storage">กำลังตรวจที่เก็บ</span><button type="button" id="demo-sync">ซิงก์อีกครั้ง</button><span id="demo-journal-status" role="status" aria-live="polite"></span></div>
+          <div id="demo-summary" class="demo-summary"></div>
+          <form id="demo-form" class="demo-form" hidden>
+            <div class="demo-form-head"><strong id="demo-form-title">จดรายการที่ปิดแล้ว</strong><span>กรอกยอดรวม US$ จากพอร์ต Demo · ไม่ส่งคำสั่งซื้อขาย</span></div>
+            <input type="hidden" name="id">
+            <div class="demo-form-grid">
+              <label class="demo-field demo-field-wide">สัญญา<input name="contract_label" maxlength="80" placeholder="เช่น QQQ 718 PUT" required></label>
+              <label class="demo-field">Ticker<input name="underlying_symbol" maxlength="10" placeholder="QQQ" autocomplete="off" required></label>
+              <label class="demo-field">ฝั่ง<select name="option_side"><option value="call">CALL</option><option value="put">PUT</option></select></label>
+              <label class="demo-field">จำนวนสัญญา<input name="contracts" type="number" min="1" max="100000" step="1" value="1" required></label>
+              <label class="demo-field">ยอดซื้อรวม US$<input name="buy_total" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+              <label class="demo-field">ยอดขายรวม US$<input name="sell_total" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+              <label class="demo-field">ค่าธรรมเนียมรวม US$<input name="fees_total" type="number" min="0" step="0.01" inputmode="decimal" value="0"></label>
+              <label class="demo-field">เวลาเปิด · เวลาไทย<input name="opened_at" type="datetime-local" required></label>
+              <label class="demo-field">เวลาปิด · เวลาไทย<input name="closed_at" type="datetime-local" required></label>
+              <label class="demo-field demo-field-wide">โน้ตสั้นๆ (ถ้ามี)<input name="notes" maxlength="500" placeholder="เช่น เข้าเมื่อกราฟ 5m ยืนยัน"></label>
+            </div>
+            <label class="demo-follow"><input name="followed_signal" type="checkbox"><span>รายการนี้เข้าตามสัญญาณแอป <small>ติ๊กจากการเทรดจริงของคุณ ไม่ใช่ระบบยืนยันผลให้อัตโนมัติ</small></span></label>
+            <div class="demo-form-actions"><button type="button" class="quiet-button" id="demo-cancel">ยกเลิก</button><button type="submit" class="demo-primary">บันทึกรายการ</button></div>
+          </form>
+          <div class="demo-list-head"><div class="segmented" id="demo-filters" role="group" aria-label="กรองรายการ Demo"><button type="button" data-demo-filter="followed" class="active" aria-pressed="true">ตามแอป</button><button type="button" data-demo-filter="all" aria-pressed="false">ทั้งหมด</button></div><span id="demo-list-count">0 รายการ</span></div>
+          <div id="demo-list" class="demo-list"></div>
+          <p class="fine-print">Win rate นี้นับเฉพาะรายการที่จดว่าปิดแล้วและมีกำไร/ขาดทุน ไม่ใช่ความแม่นของทุกสัญญาณที่แอปเคยเตือน · P/L = ยอดขายรวม − ยอดซื้อรวม − ค่าธรรมเนียมที่กรอก · ยังไม่รวมค่าธรรมเนียมที่ไม่ได้กรอก</p>
         </section>
       </main>
 
@@ -123,6 +151,7 @@
   <script src="signal-policy.js?v=1"></script>
   <script src="session-vwap.js?v=1"></script>
   <script src="api-error.js?v=3"></script>
-  <script src="app.js?v=20"></script>
+  <script src="demo-journal.js?v=1"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

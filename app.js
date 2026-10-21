@@ -9,6 +9,7 @@
   const sessionVwap = window.OptionDeskSessionVwap;
   const apiError = window.OptionDeskApiError;
   const signalPolicy = window.OptionDeskSignalPolicy;
+  const demoJournal = window.OptionDeskDemoJournal;
   const demo = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   const $ = (selector) => document.querySelector(selector);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -799,6 +800,16 @@
     $("#app-shell").hidden = false;
     $("#account-name").textContent = demo ? "ตัวอย่างในเครื่อง" : user?.email || "PCC member";
     loadFocusPreferences();
+    void demoJournal?.mount({
+      root: $("#demo-journal"), db: state.db, user,
+      context: () => {
+        const selected = contracts(state.side).find((row) => row.symbol === state.contractSymbol);
+        return {
+          symbol: state.symbol, side: state.side,
+          contractLabel: selected ? `${state.symbol} ${selected.strike} ${state.side.toUpperCase()}${state.expiry ? ` · ${state.expiry}` : ""}` : ""
+        };
+      }
+    });
     renderWatchlist();
     renderAlerts();
     try {
@@ -812,6 +823,7 @@
   }
 
   function showLogin() {
+    demoJournal?.unmount();
     state.requestId++;
     state.user = null;
     state.focusSymbols = []; state.focusAssetTypes = {}; state.focusSignals = {}; state.alerts = []; state.focusInstrumentIds = {};
@@ -822,12 +834,12 @@
   }
 
   async function init() {
-    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars || !focusList?.cleanSymbols || !sessionVwap?.calculate) {
+    if (!priceLevels?.calculate || !priceLevels?.describe || !tradePlan?.reconcile || !chartTime?.completedBars || !focusList?.cleanSymbols || !sessionVwap?.calculate || !demoJournal?.mount) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดสูตรคำนวณระดับราคาไม่สำเร็จ กรุณารีเฟรชหน้า";
       return;
     }
-    if (demo) { await showDesk({ email: "preview@local" }); return; }
+    if (demo) { await showDesk({ id: "preview-local", email: "preview@local" }); return; }
     if (!config?.supabaseUrl || !config?.supabasePublishableKey || !window.supabase?.createClient) {
       $("#auth-shell").hidden = false;
       $("#auth-message").textContent = "โหลดการเชื่อมต่อ PCC ไม่สำเร็จ กรุณารีเฟรชหน้า";
