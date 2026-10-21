@@ -6,11 +6,11 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#071417",
-  "theme_color": "#0E2931",
+  "background_color": "#083B3A",
+  "theme_color": "#083B3A",
   "icons": [
     {
-      "src": "app-icon.png",
+      "src": "app-icon-luxury.png",
       "sizes": "1254x1254",
       "type": "image/png",
       "purpose": "any"
