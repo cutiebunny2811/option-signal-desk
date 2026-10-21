@@ -399,6 +399,8 @@
       ? "หุ้นมีสัญญาณระยะสั้นแล้ว · รอ Option quote สดและเลือกสัญญาก่อนล็อกแผน"
       : "รอแท่ง 1m+5m ปิดแล้วสดและทิศทางตรงกัน · 15m ห้ามสวนทาง · 1h ใช้ดูบริบท";
     else if (state.optionGate && !state.optionGate.ok) detail = `เลือกสัญญา${state.planDirection === "up" ? " CALL" : " PUT"} ที่ผ่านเกณฑ์ · ${state.optionGate.reasons.join(" · ")}`;
+    else if (priceLevels.calculate(barsFor("M5"), state.planDirection)?.wideRisk) detail = "ระยะ Entry ถึง SL กว้างกว่า 3 ATR · ไม่ล็อกแผน รอ setup 5m ที่เสี่ยงแคบลง";
+    else if (state.vwapGate?.ready && !state.vwapGate.ok) detail = `VWAP ยังไม่ยืนยันฝั่ง ${state.planDirection === "up" ? "CALL" : "PUT"} · รอแท่ง 1m ใหม่`;
     else detail = state.planBlock || "รอข้อมูลกราฟ 1m / 5m ที่ปิดครบและสด";
     const contractName = (manual ? state.tradePlan : tracked)?.contractSymbol || state.optionGate?.symbol || "ยังไม่พร้อม";
     const vwapValue = tracked?.vwapAtTrigger ?? state.vwapGate?.value;
