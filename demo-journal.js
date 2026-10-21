@@ -10,6 +10,7 @@
   const symbolPattern = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const html = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   const money = (value) => `${Number(value) < 0 ? "−" : Number(value) > 0 ? "+" : ""}$${Math.abs(Number(value) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const dollars = (value) => `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const dateTime = (value) => new Date(value).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) + " น.";
   const localInputTime = (value = Date.now()) => {
     const date = new Date(value);
@@ -17,7 +18,7 @@
     const part = (name) => parts.find((item) => item.type === name)?.value || "00";
     return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
   };
-  const bangkokTime = (value) => /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(String(value)) ? `${value}:00+07:00` : value;
+  const bangkokTime = (value) => /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(String(value)) ? `${value}${String(value).length === 16 ? ":00" : ""}+07:00` : value;
 
   function duration(milliseconds) {
     if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
@@ -103,7 +104,7 @@
       const visible = state.rows.filter((row) => !row.voided_at && (!followedOnly || row.followed_signal)).sort((a, b) => Date.parse(b.closed_at) - Date.parse(a.closed_at));
       find("#demo-list").innerHTML = visible.length ? visible.slice(0, 100).map((row) => {
         const { net, heldMs } = result(row);
-        return `<article class="demo-row"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>$${Number(row.buy_total).toFixed(2)} <span>→</span> $${Number(row.sell_total).toFixed(2)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></article>`;
+        return `<article class="demo-row"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>${dollars(row.buy_total)} <span>→</span> ${dollars(row.sell_total)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></article>`;
       }).join("") : `<p class="demo-empty">ยังไม่มีรายการที่ปิดแล้วในมุมมองนี้ · กด “จด Demo trade” เพื่อเริ่มเก็บผลจริงจากพอร์ตทดลอง</p>`;
       find("#demo-list-count").textContent = visible.length > 100 ? `แสดง 100 จาก ${visible.length} รายการ · CSV มีครบ` : `${visible.length} รายการ`;
       find("#demo-storage").textContent = state.mode === "remote" ? "ซิงก์ Supabase" : state.mode === "loading" ? "กำลังตรวจที่เก็บ" : "เก็บในเครื่อง · สำรอง CSV";
@@ -166,6 +167,84 @@
       form.elements.namedItem("contract_label").focus();
     }
 
+    const importer = globalThis.OptionDeskImageImport;
+    const importPanel = find("#demo-image-import");
+    const importToggle = find("#demo-import-toggle");
+    const importStatus = find("#demo-import-status");
+    const importResult = find("#demo-import-result");
+    const imageFiles = { buy: null, sell: null };
+    let scanBusy = false, scanQueued = false;
+    const setImportStatus = (message, isError = false) => {
+      importStatus.textContent = message;
+      importStatus.classList.toggle("error", isError);
+    };
+    const setImportVisible = (visible) => {
+      importPanel.hidden = !visible;
+      importToggle.setAttribute("aria-expanded", String(visible));
+      if (visible) importPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    const setImageFile = (side, file) => {
+      if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setImportStatus("รองรับภาพ PNG, JPG หรือ WebP เท่านั้น", true); return; }
+      if (file.size > 10 * 1024 * 1024) { setImportStatus("รูปใหญ่เกิน 10 MB · ลองภาพที่เล็กลง", true); return; }
+      imageFiles[side] = file;
+      const slot = find(`[data-demo-image="${side}"]`);
+      slot.classList.add("ready");
+      find(`#demo-${side}-file`).textContent = file.name || "รูปที่วางจากคลิปบอร์ด";
+      importResult.hidden = true;
+      if (imageFiles.buy && imageFiles.sell) void scanImages();
+      else setImportStatus(`ได้รูป${side === "buy" ? "ซื้อ" : "ขาย"}แล้ว · เพิ่มรูปอีกฝั่งเพื่ออ่านอัตโนมัติ`);
+    };
+    async function scanImages() {
+      if (scanBusy) { scanQueued = true; return; }
+      if (!importer) { setImportStatus("ตัวอ่านภาพไม่พร้อม · รีโหลดหน้าแล้วลองใหม่", true); return; }
+      scanBusy = true;
+      const buyFile = imageFiles.buy, sellFile = imageFiles.sell;
+      setImportStatus("กำลังเตรียมตัวอ่านภาพ… ครั้งแรกอาจใช้เวลาสักครู่");
+      try {
+        const [buyText, sellText] = await importer.recognizeFiles([buyFile, sellFile], (message) => setImportStatus(message));
+        if (imageFiles.buy !== buyFile || imageFiles.sell !== sellFile || current !== state) return;
+        const trade = importer.buildClosedTrade(
+          importer.parseFilledImageText(buyText, "buy"),
+          importer.parseFilledImageText(sellText, "sell")
+        );
+        openForm();
+        const form = find("#demo-form");
+        for (const [name, value] of Object.entries(trade)) {
+          const field = form.elements.namedItem(name);
+          if (field && field.type !== "checkbox") field.value = value;
+        }
+        form.elements.namedItem("followed_signal").checked = false;
+        const gross = trade.sell_total - trade.buy_total;
+        importResult.innerHTML = `<div><small>สัญญา</small><strong>${html(trade.contract_label)} · ${trade.contracts} สัญญา</strong></div><div><small>ซื้อรวม</small><strong>${dollars(trade.buy_total)}</strong></div><div><small>ขายรวม</small><strong>${dollars(trade.sell_total)}</strong></div><div><small>กำไรก่อนค่าธรรมเนียม</small><strong class="${gross >= 0 ? "positive" : "negative"}">${money(gross)}</strong></div><div class="result-note"><strong>กรุณาตรวจฟอร์มด้านล่างก่อนบันทึก</strong> · เวลาแปลงเป็นไทยแล้ว · ค่าธรรมเนียมยังเป็น 0 เพราะภาพไม่แสดง · ติ๊ก “ตามแอป” เองหากเข้าตามสัญญาณจริง</div>`;
+        importResult.hidden = false;
+        setImportStatus("อ่านครบแล้ว · เติมฟอร์มให้ตรวจและกดบันทึก 1 ครั้ง ยังไม่ได้เก็บลงสถิติ");
+        form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (error) {
+        if (current === state) setImportStatus(`อ่านรูปไม่สำเร็จ: ${error.message} · ลองรูปที่ชัดขึ้น หรือจดเอง`, true);
+      } finally {
+        scanBusy = false;
+        if (scanQueued) { scanQueued = false; if (imageFiles.buy && imageFiles.sell) void scanImages(); }
+      }
+    }
+    importToggle.onclick = () => setImportVisible(importPanel.hidden);
+    find("#demo-import-close").onclick = () => setImportVisible(false);
+    for (const side of ["buy", "sell"]) {
+      const slot = find(`[data-demo-image="${side}"]`);
+      const input = find(`#demo-${side}-image`);
+      input.onchange = () => { if (input.files?.[0]) setImageFile(side, input.files[0]); };
+      slot.onkeydown = (event) => { if (event.target === slot && ["Enter", " "].includes(event.key)) { event.preventDefault(); input.click(); } };
+      slot.onpaste = (event) => {
+        const item = [...(event.clipboardData?.items || [])].find((entry) => entry.type.startsWith("image/"));
+        if (!item) return;
+        event.preventDefault();
+        const file = item.getAsFile();
+        if (file) setImageFile(side, file);
+      };
+      slot.ondragover = (event) => { event.preventDefault(); slot.classList.add("dragover"); };
+      slot.ondragleave = () => slot.classList.remove("dragover");
+      slot.ondrop = (event) => { event.preventDefault(); slot.classList.remove("dragover"); if (event.dataTransfer?.files?.[0]) setImageFile(side, event.dataTransfer.files[0]); };
+    }
+
     find("#demo-add").onclick = () => openForm();
     const shortcut = document.querySelector("#demo-shortcut");
     if (shortcut) shortcut.onclick = () => openForm();
@@ -217,6 +296,16 @@
       const localSaved = saveLocal();
       if (!localSaved) status("บันทึกในเครื่องไม่สำเร็จ · โปรดส่งออก CSV ก่อนออกจากหน้า", true);
       form.hidden = true;
+      if (!values.followed_signal) state.filter = "all";
+      setImportVisible(false);
+      imageFiles.buy = null; imageFiles.sell = null;
+      for (const side of ["buy", "sell"]) {
+        find(`#demo-${side}-image`).value = "";
+        find(`#demo-${side}-file`).textContent = "คลิกเลือกภาพ หรือวางด้วย Ctrl+V";
+        find(`[data-demo-image="${side}"]`).classList.remove("ready");
+      }
+      importResult.hidden = true;
+      setImportStatus("เลือกหรือวางรูปทั้งสองใบ แล้วแอปจะเติมฟอร์มให้ตรวจอีกครั้งก่อนบันทึก");
       render();
       if (state.mode === "remote") await sync();
       if (state.mode !== "remote") status(localSaved ? "บันทึกในเครื่องแล้ว · กด CSV สำรองข้อมูลไว้จนกว่าจะเชื่อม Supabase" : "ยังไม่ได้บันทึกถาวร · โปรดส่งออก CSV ก่อนออกจากหน้า", !localSaved);
