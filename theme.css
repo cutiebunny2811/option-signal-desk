@@ -1,0 +1,163 @@
+/* Bull icon palette: dark teal for structure, mint for action, ruby for risk. */
+:root {
+  --bg: #071417;
+  --surface: #0b2024;
+  --surface-2: #10292e;
+  --surface-3: #17363a;
+  --text: #e2e2e0;
+  --muted: #b4c6c5;
+  --faint: #88a3a4;
+  --line: #28484e;
+  --line-soft: #1c383e;
+  --gold: #2b7574;
+  --gold-hi: #79dcd0;
+  --ruby: #861211;
+  --ruby-hi: #f07372;
+  --green: #53ddb0;
+}
+
+body,
+.main-panel,
+.demo-journal { background: var(--bg); }
+.topbar { background: #0b2024; border-color: var(--line); }
+.watch-panel,
+.contract-panel { background: #0a1c20; }
+.index { color: #80cbc4; }
+.brand { gap: 10px; }
+.brand-icon,
+.auth-icon { display: block; object-fit: cover; flex: none; border-radius: 11px; box-shadow: 0 0 0 1px #336067; }
+.brand strong { color: #f2f3ef; }
+.market-status.is-demo { color: #b3d3ca; }
+
+/* Keep the data grid, but soften its interactive edges. */
+.quiet-button,
+.notify-button,
+.demo-primary,
+.demo-pagination button,
+.demo-import-close { border-radius: 9px; }
+.quiet-button { background: #10262a; }
+.quiet-button:hover { background: #163338; }
+.symbol-form,
+.focus-form,
+.search-field,
+.segmented,
+.level-side,
+.demo-search input,
+.expiry-control select,
+.login-form input,
+.demo-field input,
+.demo-field select { border-radius: 9px; }
+.symbol-form button,
+.focus-form button,
+.login-form button,
+.demo-primary,
+.segmented button.active,
+.level-side button[aria-pressed="true"] { color: #f4fffa; }
+.symbol-form button:hover,
+.focus-form button:hover,
+.login-form button:hover,
+.demo-primary:hover { color: #082124; }
+.focus-form { overflow: hidden; background: var(--surface-2); }
+.focus-form select { background: var(--surface-2); }
+.source-pill.demo { border-color: #3a7772; color: #a1ddd1; }
+.status-line:not(:empty) { background: #123337; color: #b7e3db; border-color: var(--line); }
+.status-line.error { background: #391819; color: #ffaaa7; border-color: #8b3434; }
+.data-status { background: #0d2327; }
+
+/* Cards remain aligned on a strict grid; their corners no longer feel like table cells. */
+.signal-grid { gap: 8px; }
+.signal-card,
+.signal-card + .signal-card { border: 1px solid var(--line); border-top: 2px solid var(--line); border-radius: 11px; background: #0e2428; }
+.signal-card:has(.up) { background: #0d2b29; border-top-color: #3db99a; }
+.signal-card:has(.down) { background: #301d21; border-top-color: #cb4d52; }
+.signal-card.context,
+.signal-card.context:has(.up),
+.signal-card.context:has(.down) { background: #162b2d; border-top-color: #64aaa5; }
+.signal-verdict,
+.option-lane,
+.plan-workflow { border-radius: 10px; }
+.signal-verdict { background: #10302a; }
+.signal-verdict.down { background: #351d22; }
+.signal-verdict.wait { background: #153035; border-color: #5ba9a4; }
+.option-lane { background: #0d2327; }
+.plan-workflow { background: #122b2e; }
+.plan-workflow.up { background: #10302a; }
+.plan-workflow.down { background: #351d22; }
+.tf-reading-note { background: #11282c; border-radius: 0 7px 7px 0; }
+
+.price-chart { background: #08181b; border-radius: 12px; }
+.level-panel,
+.oi-summary,
+.oi-table-wrap,
+.contract-stat-lead { border-radius: 11px; overflow: hidden; }
+.level-panel { background: #0c2024; }
+.level-heading { background: #102a2e; }
+.level-side { overflow: hidden; }
+.level-cell { background: #0e2327; }
+.oi-summary { background: #0d2428; }
+.oi-table th { background: #143035; }
+.oi-table .near td { background: #173b3a; }
+.oi-table .strike { color: #95e2d4; }
+.oi-table tr:hover td { background: #153338; }
+
+/* Focus list and contract selector read as individual touch targets. */
+.focus-row,
+.contract-row { margin: 0 0 5px; border: 1px solid var(--line-soft); border-left: 3px solid transparent; border-radius: 9px; overflow: hidden; background: #0d2327; }
+.focus-row.up { background: #0f2c28; }
+.focus-row.down { background: #321d21; }
+.focus-row.active { outline: none; border-color: #5db9ad; border-left-color: var(--focus-accent); }
+.focus-row.active.wait { background: #173136; }
+.contract-row.active,
+.watch-item.active { background: #17373b; border-left-color: #70c9c0; }
+.focus-row:hover,
+.contract-row:hover,
+.watch-item:hover { background: #173438; }
+.notify-button { background: #153539; }
+.notify-button:hover:not(:disabled) { background: #1b4749; }
+.alert-toast { background: #0e2b28; border-radius: 12px; }
+
+/* Demo ledger: rounded containers, ruled rows, no decorative color on profit/loss. */
+.demo-summary,
+.demo-list,
+.demo-form,
+.demo-image-import { border-radius: 12px; overflow: hidden; background: #0d2327; }
+.demo-row { background: #0c2024; }
+.demo-row:nth-child(even) { background: #10272b; }
+.demo-form { background: #0e2529; }
+.demo-import-slot { background: #10282c; }
+.demo-import-slot:hover { background: #17363a; }
+.demo-search input { background: #10282c; }
+.demo-primary { background: #2b7574; border-color: #4ca49d; }
+.demo-primary:hover { background: #83cfc3; }
+.demo-image-toggle { background: #123035; }
+.demo-follow input { accent-color: #2b7574; }
+
+.auth-shell {
+  background: linear-gradient(90deg,rgba(75,146,142,.07) 1px,transparent 1px),
+    linear-gradient(rgba(75,146,142,.07) 1px,transparent 1px),var(--bg);
+  background-size: 44px 44px;
+}
+.auth-card { border-radius: 17px; background: #0d2428; box-shadow: 0 24px 70px #0007; }
+.auth-icon { margin-bottom: 19px; border-radius: 17px; }
+.login-form input { background: #10282c; }
+
+@media (max-width: 760px) {
+  .topbar { min-height: 68px; }
+  .brand-icon { width: 37px; height: 37px; }
+  .watch-panel,
+  .contract-panel { padding: 16px 12px; }
+  .focus-row { border-radius: 9px; }
+  .main-panel section:not(.instrument-head) { padding: 20px 15px; }
+  .instrument-head { padding: 20px 15px; }
+  .signal-grid { gap: 7px; }
+  .signal-card { min-height: 117px; padding: 11px; }
+  .demo-summary { border-radius: 11px; }
+  .demo-head-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .demo-head-actions .demo-primary { grid-column: 1 / -1; }
+}
+
+@media (max-width: 430px) {
+  .brand strong { font-size: .74rem; }
+  .brand-icon { width: 35px; height: 35px; }
+  .signal-card { min-height: 108px; }
+}

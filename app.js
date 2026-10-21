@@ -484,22 +484,22 @@
     const library = window.LightweightCharts;
     if (!library?.createChart) { container.innerHTML = `<div class="chart-empty">กราฟโหลดไม่สำเร็จ กรุณารีเฟรชหน้า</div>`; return; }
     const chart = library.createChart(container, {
-      width: container.clientWidth, height: container.clientHeight, layout: { background: { color: "#030405" }, textColor: "#b5bac0", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 },
-      grid: { vertLines: { color: "#1a1e21" }, horzLines: { color: "#1a1e21" } },
-      rightPriceScale: { borderColor: "#34383d" },
-      timeScale: { borderColor: "#34383d", timeVisible: state.chartFrame !== "D", tickMarkFormatter: (time, type) => chartTime.axisTick(time, type, state.chartFrame === "D") },
+      width: container.clientWidth, height: container.clientHeight, layout: { background: { color: "#08181b" }, textColor: "#a9c1c0", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 },
+      grid: { vertLines: { color: "#193338" }, horzLines: { color: "#193338" } },
+      rightPriceScale: { borderColor: "#28484e" },
+      timeScale: { borderColor: "#28484e", timeVisible: state.chartFrame !== "D", tickMarkFormatter: (time, type) => chartTime.axisTick(time, type, state.chartFrame === "D") },
       localization: { locale: "th-TH", timeFormatter: (time) => state.chartFrame === "D" ? chartTime.formatSessionDate(time) : chartTime.formatBangkok(time) },
-      crosshair: { vertLine: { color: "#d4af3777" }, horzLine: { color: "#d4af3777" } },
+      crosshair: { vertLine: { color: "#79dcd088" }, horzLine: { color: "#79dcd088" } },
       handleScroll: { horzTouchDrag: true, vertTouchDrag: false }
     });
-    const candles = chart.addSeries(library.CandlestickSeries, { upColor: "#27d98b", downColor: "#ff5363", borderVisible: false, wickUpColor: "#27d98b", wickDownColor: "#ff5363" });
+    const candles = chart.addSeries(library.CandlestickSeries, { upColor: "#53ddb0", downColor: "#f07372", borderVisible: false, wickUpColor: "#53ddb0", wickDownColor: "#f07372" });
     candles.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
     const volume = chart.addSeries(library.HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-    volume.setData(bars.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "#27d98b66" : "#ff536366" })));
+    volume.setData(bars.map((bar) => ({ time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "#53ddb066" : "#f0737266" })));
     chart.priceScale("volume").applyOptions({ visible: false, scaleMargins: { top: .83, bottom: 0 } });
     const closes = bars.map((bar) => bar.close);
     const frameLabel = { M1: "1m", M5: "5m", M15: "15m", M60: "1h", M240: "4h", D: "1D" }[state.chartFrame];
-    [[9, "#4bd6eb"], [21, "#d4af37"]].forEach(([period, color]) => {
+    [[9, "#70d8d0"], [21, "#d1d6c9"]].forEach(([period, color]) => {
       const line = chart.addSeries(library.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       const values = ema(closes, period);
       line.setData(bars.map((bar, index) => ({ time: bar.time, value: values[index] })));
@@ -513,18 +513,18 @@
         overlayPrices.push(price);
       };
       if (fresh && indicators) {
-        addLevel(indicators.projection, "Forecast*", "#b58cff", library.LineStyle?.Dotted ?? 1);
+        addLevel(indicators.projection, "Forecast*", "#bca5dd", library.LineStyle?.Dotted ?? 1);
         if (["M1", "M5", "M15"].includes(state.chartFrame)) {
           const startTime = Math.max(bars.at(-1).time, indicators.basedOn + 300);
-          const projectionLine = chart.addSeries(library.LineSeries, { color: "#b58cff", lineStyle: library.LineStyle?.Dotted ?? 1, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          const projectionLine = chart.addSeries(library.LineSeries, { color: "#bca5dd", lineStyle: library.LineStyle?.Dotted ?? 1, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
           projectionLine.setData([{ time: startTime, value: indicators.ema9 }, { time: startTime + 900, value: indicators.projection }]);
         }
       }
       if (plan) {
-        addLevel(plan.entry, "ENTRY", livePlan ? "#4bd6eb" : "#82949b");
-        addLevel(plan.stop, "SL", livePlan ? "#ff5262" : "#98747b");
-        addLevel(plan.tp1, "TP1", livePlan ? "#27db8c" : "#678f7a");
-        addLevel(plan.tp2, "TP2", livePlan ? "#18ac71" : "#5d806e");
+        addLevel(plan.entry, "ENTRY", livePlan ? "#79dcd0" : "#829c9d");
+        addLevel(plan.stop, "SL", livePlan ? "#f07372" : "#a27a7b");
+        addLevel(plan.tp1, "TP1", livePlan ? "#53ddb0" : "#6d9888");
+        addLevel(plan.tp2, "TP2", livePlan ? "#2baf8c" : "#527f70");
       }
       if (overlayPrices.length) {
         const scaleGuide = chart.addSeries(library.LineSeries, { color: "rgba(0, 0, 0, 0)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });

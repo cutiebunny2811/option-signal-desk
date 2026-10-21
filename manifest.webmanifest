@@ -1,0 +1,19 @@
+{
+  "name": "Option Signal Desk",
+  "short_name": "Option Desk",
+  "description": "ดูสัญญาณหุ้นและจดผลเทรดทดลองด้วยข้อมูล PCC",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#071417",
+  "theme_color": "#0E2931",
+  "icons": [
+    {
+      "src": "app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
