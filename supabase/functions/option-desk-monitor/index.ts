@@ -6,7 +6,12 @@ const url = Deno.env.get("SUPABASE_URL")!;
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-const jsonHeaders = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization,content-type,x-monitor-secret" };
+const jsonHeaders = {
+  "content-type": "application/json; charset=utf-8",
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-allow-headers": "authorization,apikey,x-client-info,content-type,x-monitor-secret",
+};
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 const ISO = (ms: number) => new Date(ms).toISOString();
 
