@@ -54,6 +54,19 @@
     line.classList.toggle("error", isError);
   }
 
+  async function withDeadline(run, timeoutMs, message) {
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        run(controller.signal),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error(message)); }, timeoutMs);
+        })
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
   const ema = (values, period) => priceLevels.ema(values, period);
 
   function normalizeBars(input) {
@@ -757,7 +770,10 @@
   function renderAll() { renderWatchlist(); renderHeader(); renderSignals(); renderDataStatus(); renderOi(); renderContract(); updateTradePlan(); renderChart(); renderLevels(); }
 
   async function edge(action, body) {
-    const { data, error } = await state.db.functions.invoke("refresh-stock-prices", { body: { action, ...body } });
+    const { data, error } = await withDeadline(
+      (signal) => state.db.functions.invoke("refresh-stock-prices", { body: { action, ...body }, signal }),
+      20_000, "เซิร์ฟเวอร์ตอบช้าเกิน 20 วินาที · ลองรีเฟรชอีกครั้ง"
+    );
     if (error) {
       let detail = error.message;
       try { detail = (await error.context?.clone?.().json())?.error || detail; } catch (_) { /* Keep SDK message. */ }
@@ -816,16 +832,23 @@
   async function resolveInstrument(symbol) {
     if (demo) return symbol;
     if (state.focusInstrumentIds[symbol]) return state.focusInstrumentIds[symbol];
-    const { data, error } = await state.db.from("instruments").select("id,symbol,asset_type").eq("symbol", symbol).in("asset_type", ["stock", "etf"]).limit(1);
+    const { data, error } = await withDeadline(
+      (signal) => state.db.from("instruments").select("id,symbol,asset_type")
+        .eq("symbol", symbol).in("asset_type", ["stock", "etf"]).limit(1).abortSignal(signal),
+      10_000, "ค้นหาหุ้นใน PCC ช้าเกิน 10 วินาที · ลองรีเฟรชอีกครั้ง"
+    );
     if (error) return null;
     let id = data?.[0]?.id || null;
     if (!id && state.focusSymbols.includes(symbol)) {
       const assetType = state.focusAssetTypes[symbol] === "etf" ? "etf" : "stock";
-      const { data: createdId, error: createError } = await state.db.rpc("api_upsert_instrument", {
-        p_asset_type: assetType, p_symbol: symbol, p_display_name: symbol,
-        p_exchange: null, p_currency: "USD", p_option_type: null,
-        p_strike: null, p_expiry: null, p_multiplier: 1
-      });
+      const { data: createdId, error: createError } = await withDeadline(
+        (signal) => state.db.rpc("api_upsert_instrument", {
+          p_asset_type: assetType, p_symbol: symbol, p_display_name: symbol,
+          p_exchange: null, p_currency: "USD", p_option_type: null,
+          p_strike: null, p_expiry: null, p_multiplier: 1
+        }).abortSignal(signal),
+        10_000, "เพิ่มหุ้นใน PCC ช้าเกิน 10 วินาที · ลองรีเฟรชอีกครั้ง"
+      );
       if (createError) return null;
       id = createdId || null;
     }
@@ -950,7 +973,6 @@
     $("#app-shell").hidden = false;
     $("#account-name").textContent = demo ? "ตัวอย่างในเครื่อง" : user?.email || "PCC member";
     loadFocusPreferences();
-    if (!demo) await initMonitor();
     void demoJournal?.mount({
       root: $("#demo-journal"), db: state.db, user,
       context: () => {
@@ -972,6 +994,7 @@
       setStatus(error.message || "โหลดรายการหุ้นไม่สำเร็จ", true);
       renderAll();
     }
+    if (!demo) void initMonitor();
   }
 
   function showLogin() {
