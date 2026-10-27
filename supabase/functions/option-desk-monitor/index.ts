@@ -37,6 +37,7 @@ async function sendPush(userId: string, payload: Record<string, unknown>) {
   if (error) throw error;
   const client = pushClient();
   let sent = 0, failed = 0;
+  const errors: Array<{ status: number; message: string }> = [];
   for (const row of data || []) {
     try {
       await client.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, JSON.stringify(payload), { TTL: 120 });
@@ -46,9 +47,10 @@ async function sendPush(userId: string, payload: Record<string, unknown>) {
       const status = Number((error as { statusCode?: number })?.statusCode);
       if (status === 404 || status === 410) await admin.from("option_desk_push_subscriptions").delete().eq("id", row.id);
       console.error("Push delivery failed", { status, userId, subscriptionId: row.id });
+      errors.push({ status: Number.isFinite(status) ? status : 0, message: error instanceof Error ? error.message.slice(0, 160) : "Push failed" });
     }
   }
-  return { sent, failed };
+  return { sent, failed, errors };
 }
 
 async function scanOne(row: { user_id: string; symbol: string; direction: string; fresh: boolean; as_of: number }, now: number) {
@@ -137,9 +139,10 @@ async function runMonitor() {
 
 async function testPush(request: Request) {
   const bearer = request.headers.get("authorization") || "";
-  const client = createClient(url, anonKey, { global: { headers: { authorization: bearer } }, auth: { persistSession: false } });
-  const { data: { user }, error } = await client.auth.getUser();
-  if (error || !user) return answer({ error: "เข้าสู่ระบบก่อน" }, 401);
+  const token = bearer.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return answer({ error: "ไม่มี session กรุณาเข้าสู่ระบบใหม่" }, 401);
+  const { data: { user }, error } = await admin.auth.getUser(token);
+  if (error || !user) return answer({ error: `Session ใช้ไม่ได้: ${error?.message || "กรุณาเข้าสู่ระบบใหม่"}` }, 401);
   const { data: settings, error: settingsError } = await admin.from("option_desk_monitor_settings")
     .select("last_test_at").eq("user_id", user.id).maybeSingle();
   if (settingsError) throw settingsError;
@@ -159,9 +162,16 @@ Deno.serve(async (request) => {
   try {
     const body = await request.json().catch(() => ({}));
     if (body?.action === "test") return await testPush(request);
-    if (body?.action !== "scan") return answer({ error: "Unknown action" }, 400);
+    if (!["scan", "diagnostic"].includes(body?.action)) return answer({ error: "Unknown action" }, 400);
     const token = Deno.env.get("OPTION_DESK_MONITOR_TOKEN");
     if (!token || request.headers.get("x-monitor-secret") !== token) return answer({ error: "Unauthorized" }, 401);
+    if (body.action === "diagnostic") {
+      const ownerId = Deno.env.get("OPTIONS_OPRA_OWNER_USER_ID") || Deno.env.get("OPTIONS_EOD_OWNER_USER_ID");
+      if (!ownerId) return answer({ error: "Market-data owner is not configured" }, 503);
+      return answer({ delivery: await sendPush(ownerId, {
+        title: "Option Desk · ตรวจการแจ้งเตือน", body: "ทดสอบส่งจากเซิร์ฟเวอร์ไปยังอุปกรณ์ที่เปิด Push", tag: "option-desk-diagnostic"
+      }) });
+    }
     return await runMonitor();
   } catch (error) {
     console.error("Option Desk monitor error", error);
