@@ -24,5 +24,6 @@ test("only a new completed bar and direction transition can notify", () => {
   assert.equal(shouldAlert({ direction: "wait", fresh: true, as_of: 1000 }, next), true);
   assert.equal(shouldAlert({ direction: "up", fresh: true, as_of: 1000 }, next), false);
   assert.equal(shouldAlert({ direction: "wait", fresh: true, as_of: 2000 }, next), false);
-  assert.equal(shouldAlert({ direction: "wait", fresh: false, as_of: 1000 }, next), false);
+  assert.equal(shouldAlert({ direction: "wait", fresh: false, as_of: 1000 }, next), true);
+  assert.equal(shouldAlert({ direction: "up", fresh: false, as_of: 1000 }, next), false);
 });

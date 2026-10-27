@@ -81,6 +81,6 @@ export function assessChart(chart, now = Date.now()) {
 }
 
 export function shouldAlert(previous, next) {
-  return Boolean(previous?.fresh && next?.fresh && previous.as_of > 0 && next.asOf > previous.as_of
+  return Boolean(next?.fresh && previous?.as_of > 0 && next.asOf > previous.as_of
     && ["up", "down"].includes(next.direction) && previous.direction !== next.direction);
 }

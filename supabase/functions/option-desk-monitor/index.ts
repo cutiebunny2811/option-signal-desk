@@ -60,10 +60,13 @@ async function scanOne(row: { user_id: string; symbol: string; direction: string
   if (chart?.refresh_error && /429|quota|rate limit/i.test(String(chart.refresh_error))) throw new Error(String(chart.refresh_error).slice(0, 180));
   const next = assessChart(chart, now);
   const change = shouldAlert(row, next);
-  const { error: updateError } = await admin.from("option_desk_monitor_state").update({
-    direction: next.direction, tier: next.tier, fresh: next.fresh, price: next.price,
-    as_of: next.asOf, checked_at: ISO(now), last_error: chart?.refresh_error ? String(chart.refresh_error).slice(0, 180) : null,
-  }).eq("user_id", row.user_id).eq("symbol", row.symbol);
+  const update = {
+    ...(next.fresh ? { direction: next.direction, tier: next.tier, as_of: next.asOf } : {}),
+    fresh: next.fresh, price: next.price, checked_at: ISO(now),
+    last_error: chart?.refresh_error ? String(chart.refresh_error).slice(0, 180) : null,
+  };
+  const { error: updateError } = await admin.from("option_desk_monitor_state").update(update)
+    .eq("user_id", row.user_id).eq("symbol", row.symbol);
   if (updateError) throw updateError;
   if (!change) return { symbol: row.symbol, direction: next.direction, notified: false };
   const { error: eventError } = await admin.from("option_desk_monitor_events").insert({
