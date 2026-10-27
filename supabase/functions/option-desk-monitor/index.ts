@@ -31,9 +31,13 @@ function pushClient() {
   return webpush;
 }
 
-async function sendPush(userId: string, payload: Record<string, unknown>) {
-  const { data, error } = await admin.from("option_desk_push_subscriptions")
+async function sendPush(userId: string, payload: Record<string, unknown>, provider?: "chrome" | "apple", endpoint?: string) {
+  let query = admin.from("option_desk_push_subscriptions")
     .select("id,endpoint,p256dh,auth").eq("user_id", userId);
+  if (endpoint) query = query.eq("endpoint", endpoint);
+  if (provider === "chrome") query = query.like("endpoint", "https://fcm.googleapis.com/%");
+  if (provider === "apple") query = query.like("endpoint", "https://web.push.apple.com/%");
+  const { data, error } = await query;
   if (error) throw error;
   const client = pushClient();
   let sent = 0, failed = 0;
@@ -137,20 +141,23 @@ async function runMonitor() {
   return answer({ market: "open", scanned: results.length, results });
 }
 
-async function testPush(request: Request) {
+async function testPush(request: Request, body: Record<string, unknown>) {
   const bearer = request.headers.get("authorization") || "";
   const token = bearer.replace(/^Bearer\s+/i, "").trim();
   if (!token) return answer({ error: "ไม่มี session กรุณาเข้าสู่ระบบใหม่" }, 401);
   const { data: { user }, error } = await admin.auth.getUser(token);
   if (error || !user) return answer({ error: `Session ใช้ไม่ได้: ${error?.message || "กรุณาเข้าสู่ระบบใหม่"}` }, 401);
+  if (typeof body.endpoint !== "string" || !/^https:\/\//.test(body.endpoint) || body.endpoint.length > 2048) {
+    return answer({ error: "ไม่พบ Push ของเครื่องนี้ กรุณาเปิดแจ้งเตือนใหม่" }, 400);
+  }
   const { data: settings, error: settingsError } = await admin.from("option_desk_monitor_settings")
     .select("last_test_at").eq("user_id", user.id).maybeSingle();
   if (settingsError) throw settingsError;
   if (settings?.last_test_at && Date.now() - Date.parse(settings.last_test_at) < 60_000) return answer({ error: "ทดสอบได้ทุก 1 นาที" }, 429);
   const delivery = await sendPush(user.id, {
-    title: "Option Desk · ทดสอบแจ้งเตือน", body: "แจ้งเตือนถึงอุปกรณ์นี้แล้ว · สัญญาณจริงจะส่งเมื่อทิศทางเปลี่ยนและตลาดเปิด",
+    title: "Option Desk · ทดสอบแจ้งเตือน", body: "ทดสอบ Push ไปยังเครื่องนี้ · สัญญาณจริงจะส่งเมื่อทิศทางเปลี่ยนและตลาดเปิด",
     tag: "option-desk-test", url: "/",
-  });
+  }, undefined, body.endpoint);
   if (!delivery.sent) return answer({ error: "ยังส่งไม่ถึงอุปกรณ์ ตรวจการอนุญาตแจ้งเตือน", delivery }, 502);
   await admin.from("option_desk_monitor_settings").update({ last_test_at: new Date().toISOString() }).eq("user_id", user.id);
   return answer({ ok: true, delivery });
@@ -161,16 +168,17 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return answer({ error: "Method not allowed" }, 405);
   try {
     const body = await request.json().catch(() => ({}));
-    if (body?.action === "test") return await testPush(request);
+    if (body?.action === "test") return await testPush(request, body);
     if (!["scan", "diagnostic"].includes(body?.action)) return answer({ error: "Unknown action" }, 400);
     const token = Deno.env.get("OPTION_DESK_MONITOR_TOKEN");
     if (!token || request.headers.get("x-monitor-secret") !== token) return answer({ error: "Unauthorized" }, 401);
     if (body.action === "diagnostic") {
       const ownerId = Deno.env.get("OPTIONS_OPRA_OWNER_USER_ID") || Deno.env.get("OPTIONS_EOD_OWNER_USER_ID");
       if (!ownerId) return answer({ error: "Market-data owner is not configured" }, 503);
+      const provider = body.target === "chrome" || body.target === "apple" ? body.target : undefined;
       return answer({ delivery: await sendPush(ownerId, {
         title: "Option Desk · ตรวจการแจ้งเตือน", body: "ทดสอบส่งจากเซิร์ฟเวอร์ไปยังอุปกรณ์ที่เปิด Push", tag: "option-desk-diagnostic"
-      }) });
+      }, provider) });
     }
     return await runMonitor();
   } catch (error) {

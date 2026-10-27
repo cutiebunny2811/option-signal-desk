@@ -1063,15 +1063,18 @@
     try {
       const { data: { session }, error: sessionError } = await state.db.auth.getSession();
       if (sessionError || !session?.access_token) throw new Error("Session หมดอายุ กรุณาเข้าสู่ระบบใหม่");
+      const registration = state.swRegistration || await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) throw new Error("ไม่พบ Push ของเครื่องนี้ กรุณาเปิดแจ้งเตือนใหม่");
       const { data, error } = await state.db.functions.invoke("option-desk-monitor", {
-        body: { action: "test" }, headers: { Authorization: `Bearer ${session.access_token}` }
+        body: { action: "test", endpoint: subscription.endpoint }, headers: { Authorization: `Bearer ${session.access_token}` }
       });
       if (error || data?.error) {
         let detail = data?.error || error?.message || "ส่งไม่สำเร็จ";
         try { detail = (await error?.context?.clone?.().json())?.error || detail; } catch (_) { /* Show the SDK error. */ }
         throw new Error(detail);
       }
-      state.monitorError = "ส่งทดสอบแล้ว · ดูการแจ้งเตือนบนอุปกรณ์นี้";
+      state.monitorError = "ผู้ให้บริการ Push รับคำขอของเครื่องนี้แล้ว · หากไม่เด้ง ให้ตรวจการตั้งค่าแจ้งเตือนของระบบ";
     } catch (error) { state.monitorError = `ทดสอบไม่สำเร็จ: ${error.message}`; }
     button.disabled = false; renderAlerts();
   });
