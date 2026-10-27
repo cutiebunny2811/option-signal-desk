@@ -29,13 +29,13 @@
     chart: null, resizeObserver: null, busy: false, requestId: 0, lastError: "",
     lastOptionAttemptAt: 0, lastChartAttemptAt: {},
     lastInteractionAt: Date.now(), lastManualAt: 0, quotaPauseUntil: 0, planDirection: "wait", levelSide: "auto",
-    tradePlan: null, optionGate: null, vwapGate: null, planBlock: "", signalAssessment: null
+    tradePlan: null, optionGate: null, vwapGate: null, planBlock: "", signalAssessment: null,
+    swRegistration: null, deviceSubscribed: false, serverMonitorEnabled: false, serverPauseUntil: 0, monitorError: "", lastMonitorReadAt: 0
   };
 
   const OPTION_POLL_MS = 3 * 60_000;
   const MINUTE_POLL_MS = 2 * 60_000;
   const HOUR_POLL_MS = 45 * 60_000;
-  const IDLE_PAUSE_MS = 20 * 60_000;
   const FOCUS_SCAN_SPACING_MS = 45_000;
   let alertToastTimer = null;
 
@@ -174,6 +174,150 @@
       localStorage.setItem(focusStorageKey("focus-types"), JSON.stringify(state.focusAssetTypes));
     }
     catch (_) { $("#focus-feedback").textContent = "บันทึกรายการในเบราว์เซอร์ไม่ได้ · รายการอาจหายเมื่อปิดหน้า"; }
+    if (!demo && state.db && state.user) void persistMonitorSettings();
+  }
+
+  async function persistMonitorSettings() {
+    const { error } = await state.db.from("option_desk_monitor_settings").update({
+      symbols: state.focusSymbols, asset_types: state.focusAssetTypes, updated_at: new Date().toISOString()
+    }).eq("user_id", state.user.id);
+    if (error) { state.monitorError = "ซิงก์หุ้นเฝ้าไปเซิร์ฟเวอร์ไม่สำเร็จ"; renderAlerts(); }
+  }
+
+  async function initMonitor() {
+    if (demo) return;
+    try {
+      const { data, error } = await state.db.from("option_desk_monitor_settings")
+        .select("symbols,asset_types,enabled").eq("user_id", state.user.id).maybeSingle();
+      if (error) throw error;
+      if (data) {
+        state.focusSymbols = focusList.cleanSymbols(data.symbols);
+        state.focusAssetTypes = data.asset_types && typeof data.asset_types === "object" ? data.asset_types : {};
+        state.serverMonitorEnabled = Boolean(data.enabled);
+        localStorage.setItem(focusStorageKey("focus"), JSON.stringify(state.focusSymbols));
+        localStorage.setItem(focusStorageKey("focus-types"), JSON.stringify(state.focusAssetTypes));
+      } else {
+        const { error: insertError } = await state.db.from("option_desk_monitor_settings")
+          .insert({ user_id: state.user.id, symbols: state.focusSymbols, asset_types: state.focusAssetTypes });
+        if (insertError) throw insertError;
+      }
+      await Promise.allSettled(state.focusSymbols.map((symbol) => resolveInstrument(symbol)));
+      await readMonitorState();
+      if ("serviceWorker" in navigator) {
+        state.swRegistration = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+        const existing = await state.swRegistration.pushManager?.getSubscription();
+        if (existing && Notification.permission === "granted") {
+          await saveSubscription(existing);
+          state.deviceSubscribed = true;
+        }
+      }
+      state.monitorError = "";
+    } catch (error) {
+      state.monitorError = `เซิร์ฟเวอร์แจ้งเตือนยังไม่พร้อม: ${error.message || "เชื่อมต่อไม่สำเร็จ"}`;
+    }
+    renderWatchlist(); renderAlerts(); renderDataStatus();
+  }
+
+  async function readMonitorState() {
+    if (!state.db || !state.user || document.hidden) return;
+    state.lastMonitorReadAt = Date.now();
+    const { data: settings, error: settingsError } = await state.db.from("option_desk_monitor_settings")
+      .select("enabled,pause_until").eq("user_id", state.user.id).maybeSingle();
+    if (settingsError) { state.monitorError = "อ่านสถานะเซิร์ฟเวอร์ไม่สำเร็จ"; renderAlerts(); return; }
+    state.serverMonitorEnabled = Boolean(settings?.enabled);
+    state.serverPauseUntil = Date.parse(settings?.pause_until || "") || 0;
+    if (!state.serverMonitorEnabled) { renderAlerts(); renderDataStatus(); return; }
+    const [{ data: rows, error }, { data: events, error: eventError }] = await Promise.all([
+      state.db.from("option_desk_monitor_state").select("symbol,direction,tier,fresh,price,as_of,checked_at,last_error")
+        .eq("user_id", state.user.id),
+      state.db.from("option_desk_monitor_events").select("id,symbol,direction,tier,as_of,created_at")
+        .eq("user_id", state.user.id).order("created_at", { ascending: false }).limit(20)
+    ]);
+    if (error || eventError) { state.monitorError = "อ่านสถานะสแกนจากเซิร์ฟเวอร์ไม่สำเร็จ"; renderAlerts(); return; }
+    for (const row of rows || []) if (state.focusSymbols.includes(row.symbol) && row.symbol !== state.symbol) {
+      state.focusSignals[row.symbol] = {
+        direction: row.direction, tier: row.tier, fresh: row.fresh,
+        price: numeric(row.price), asOf: Number(row.as_of), checkedAt: Date.parse(row.checked_at || "") || 0,
+        error: row.last_error || undefined
+      };
+    }
+    for (const event of [...(events || [])].reverse()) {
+      const id = `server:${event.id}`;
+      if (state.alerts.some((item) => item.id === id)) continue;
+      const side = event.direction === "up" ? "CALL" : "PUT";
+      state.alerts.unshift({ id, symbol: event.symbol, title: `${event.symbol} · เริ่มเฝ้า ${side}`,
+        body: `${event.tier === "aligned" ? "แท่งปิด 1m/5m/15m ตรงกัน" : "แท่งปิด 1m+5m ตรงกัน"} · ตรวจสัญญาก่อน`, at: Date.parse(event.created_at) });
+    }
+    state.alerts = state.alerts.slice(0, 20);
+    try { localStorage.setItem(focusStorageKey("alerts"), JSON.stringify(state.alerts)); } catch (_) { /* Keep in memory. */ }
+    renderWatchlist(); renderAlerts();
+  }
+
+  function pushSupported() {
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const standalone = window.navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+    return window.isSecureContext && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window
+      && Boolean(config?.vapidPublicKey) && (!iphone || standalone);
+  }
+
+  function vapidBytes(key) {
+    const binary = atob(key.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - key.length % 4) % 4));
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  }
+
+  function encodedKey(buffer) {
+    return btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function saveSubscription(subscription) {
+    const keys = { p256dh: encodedKey(subscription.getKey("p256dh")), auth: encodedKey(subscription.getKey("auth")) };
+    const { error } = await state.db.from("option_desk_push_subscriptions").upsert({
+      user_id: state.user.id, endpoint: subscription.endpoint, ...keys, updated_at: new Date().toISOString()
+    }, { onConflict: "endpoint" });
+    if (error) throw error;
+  }
+
+  async function enablePush() {
+    if (!pushSupported()) return;
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== "granted") { renderAlerts(); return; }
+    try {
+      state.swRegistration ||= await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription()
+        || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidBytes(config.vapidPublicKey) });
+      await saveSubscription(subscription);
+      const { error } = await state.db.from("option_desk_monitor_settings").update({ enabled: true })
+        .eq("user_id", state.user.id);
+      if (error) throw error;
+      state.deviceSubscribed = true;
+      state.serverMonitorEnabled = true;
+      state.monitorError = "";
+      void readMonitorState();
+    } catch (error) { state.monitorError = `เปิดแจ้งเตือนไม่สำเร็จ: ${error.message || "ไม่ทราบสาเหตุ"}`; }
+    renderAlerts(); renderDataStatus();
+  }
+
+  async function disablePush() {
+    try {
+      const registration = state.swRegistration || await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const { error } = await state.db.from("option_desk_push_subscriptions").delete()
+          .eq("user_id", state.user.id).eq("endpoint", subscription.endpoint);
+        if (error) throw error;
+        await subscription.unsubscribe();
+      }
+      state.deviceSubscribed = false;
+      const { count } = await state.db.from("option_desk_push_subscriptions")
+        .select("id", { head: true, count: "exact" }).eq("user_id", state.user.id);
+      if (!count) {
+        await state.db.from("option_desk_monitor_settings").update({ enabled: false }).eq("user_id", state.user.id);
+        state.serverMonitorEnabled = false;
+      }
+      state.monitorError = "";
+    } catch (error) { state.monitorError = `ปิดแจ้งเตือนไม่สำเร็จ: ${error.message || "ไม่ทราบสาเหตุ"}`; }
+    renderAlerts(); renderDataStatus();
   }
 
   function focusSummary(charts) {
@@ -198,12 +342,19 @@
 
   function renderAlerts() {
     $("#alert-list").innerHTML = state.alerts.length ? state.alerts.slice(0, 5).map((item) => `<li><button type="button" data-alert-symbol="${esc(item.symbol)}"><strong>${esc(item.title)}</strong><span>${esc(item.body)}</span><time datetime="${new Date(item.at).toISOString()}">${bkkTime(item.at)}</time></button></li>`).join("") : `<li class="alert-empty">ยังไม่มีแจ้งเตือนใหม่</li>`;
-    const supported = "Notification" in window && window.isSecureContext;
-    const permission = supported ? Notification.permission : "unsupported";
+    const supported = pushSupported();
+    const permission = "Notification" in window ? Notification.permission : "unsupported";
     const button = $("#notify-button");
-    button.disabled = !supported || permission !== "default";
-    button.textContent = permission === "granted" ? "แจ้งเตือนเบราว์เซอร์: เปิดแล้ว" : permission === "denied" ? "แจ้งเตือนเบราว์เซอร์: ถูกบล็อก" : supported ? "เปิดแจ้งเตือนเบราว์เซอร์" : "เบราว์เซอร์ไม่รองรับแจ้งเตือน";
-    $("#notify-state").textContent = permission === "granted" ? "แจ้งเตือนขณะหน้านี้เปิดอยู่ · ปิดหน้าแล้วระบบหยุดสแกน" : permission === "denied" ? "อนุญาตใหม่ได้ในตั้งค่าเว็บไซต์ของเบราว์เซอร์ · แจ้งในหน้ายังทำงาน" : "แจ้งในหน้าได้ทันที · ต้องกดอนุญาตเพื่อแจ้งนอกแท็บ";
+    button.disabled = !supported || permission === "denied" || state.deviceSubscribed;
+    button.textContent = state.deviceSubscribed ? "แจ้งเตือนเครื่องนี้: เปิดแล้ว" : permission === "denied" ? "แจ้งเตือนถูกบล็อก" : supported ? "เปิดแจ้งเตือนเครื่องนี้" : "เปิดจากแอปบนหน้าจอหลัก";
+    $("#notify-test").hidden = !state.deviceSubscribed;
+    $("#notify-disable").hidden = !state.deviceSubscribed;
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    $("#notify-state").textContent = state.monitorError || (state.deviceSubscribed && state.serverMonitorEnabled
+      ? Date.now() < state.serverPauseUntil ? "เซิร์ฟเวอร์พักหลังเจอโควต้าข้อมูล · จะลองใหม่อัตโนมัติ" : "เซิร์ฟเวอร์สแกนหุ้นเฝ้าแม้ปิดหน้า · สูงสุด 2 ตัว/นาที · แจ้งเมื่อทิศทางใหม่เปลี่ยน"
+      : iphone && !supported ? "บน iPhone ต้องเพิ่มเว็บไปหน้าจอหลักก่อน แล้วเปิดแอปจากไอคอนเพื่อรับ Push"
+      : permission === "denied" ? "อนุญาตแจ้งเตือนใหม่ในตั้งค่าเว็บไซต์ของเบราว์เซอร์"
+      : "สิทธิ์แจ้งเตือนอย่างเดียวไม่พอ ต้องกดเปิด Push เครื่องนี้ก่อน");
   }
 
   function emitAlert(id, symbol, title, body, at = Date.now()) {
@@ -218,8 +369,8 @@
     toast.hidden = false;
     clearTimeout(alertToastTimer);
     alertToastTimer = setTimeout(() => { toast.hidden = true; }, 9_000);
-    if (!demo && "Notification" in window && Notification.permission === "granted") {
-      try { new Notification(title, { body, tag: id }); } catch (_) { /* In-page alert still works. */ }
+    if (!demo && state.swRegistration && "Notification" in window && Notification.permission === "granted") {
+      void state.swRegistration.showNotification(title, { body, tag: id, icon: "app-icon-luxury.png" }).catch(() => {});
     }
   }
 
@@ -228,7 +379,7 @@
     const previous = state.focusSignals[symbol];
     state.focusSignals[symbol] = summary;
     const direction = focusList.transition(previous, summary);
-    if (direction && marketOpenNow() && !demo) {
+    if (direction && marketOpenNow() && !demo && !state.serverMonitorEnabled) {
       const side = direction === "up" ? "CALL" : "PUT";
       emitAlert(`watch:${symbol}:${side}:${summary.asOf}`, symbol, `${symbol} · เริ่มเฝ้า ${side}`, `${summary.tier === "aligned" ? "แท่งปิด 1m/5m/15m ตรงกัน" : "สัญญาณเร็วจากแท่งปิด 1m+5m"} · 1h เป็นบริบท · ยังไม่ใช่จุดเข้า ตรวจ Option และแผนก่อน`);
     }
@@ -452,9 +603,8 @@
 
   function renderDataStatus() {
     const open = marketOpenNow();
-    const idle = Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS;
     const paused = Date.now() < state.quotaPauseUntil;
-    $("#refresh-policy").textContent = demo ? "ข้อมูลตัวอย่างในเครื่อง" : paused ? "พักการดึงข้อมูลหลังพบข้อจำกัด API" : !open ? "ตลาดสหรัฐฯ ปิด · หยุดรีเฟรชอัตโนมัติ" : document.hidden || idle ? "พักอัตโนมัติ · กลับมาที่แท็บเพื่ออัปเดต" : "ติดตามอัตโนมัติ · กราฟ 2 นาที / Option 3 นาที";
+    $("#refresh-policy").textContent = demo ? "ข้อมูลตัวอย่างในเครื่อง" : paused ? "พักการดึงข้อมูลหลังพบข้อจำกัด API" : !open ? "ตลาดสหรัฐฯ ปิด · หยุดรีเฟรชอัตโนมัติ" : document.hidden ? state.serverMonitorEnabled ? "หน้าเว็บพัก · เซิร์ฟเวอร์สแกนหุ้นเฝ้าอยู่" : "หน้าเว็บพัก · เปิด Push เพื่อสแกนต่อเมื่อปิดหน้า" : "หน้าที่เปิดดู: กราฟ 2 นาที / Option 3 นาที · หุ้นเฝ้า: เซิร์ฟเวอร์";
     const quoteTimes = [...contracts("call"), ...contracts("put")].map((item) => new Date(item.quote_time).getTime()).filter(Number.isFinite);
     $("#option-freshness").textContent = quoteTimes.length ? `Option quote ${bkkTime(new Date(Math.max(...quoteTimes)))}` : "Option quote —";
     const minute = state.charts.M1;
@@ -684,8 +834,8 @@
   }
 
   async function maybeScanFocus() {
-    if (!state.user || state.focusScanBusy || state.busy || document.hidden || !marketOpenNow()) return;
-    if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
+    if (!state.user || state.serverMonitorEnabled || state.focusScanBusy || state.busy || document.hidden || !marketOpenNow()) return;
+    if (Date.now() < state.quotaPauseUntil) return;
     if (Date.now() - state.focusScanAt < FOCUS_SCAN_SPACING_MS) return;
     const length = state.focusSymbols.length;
     if (length < 2) return;
@@ -800,6 +950,7 @@
     $("#app-shell").hidden = false;
     $("#account-name").textContent = demo ? "ตัวอย่างในเครื่อง" : user?.email || "PCC member";
     loadFocusPreferences();
+    if (!demo) await initMonitor();
     void demoJournal?.mount({
       root: $("#demo-journal"), db: state.db, user,
       context: () => {
@@ -813,7 +964,8 @@
     renderWatchlist();
     renderAlerts();
     try {
-      await loadSymbol(state.focusSymbols[0] || "NVDA");
+      const requested = new URLSearchParams(location.search).get("symbol");
+      await loadSymbol(focusList.symbol(requested) || state.focusSymbols[0] || "NVDA");
       state.focusScanCursor = state.focusSymbols.length > 1 ? 1 : 0;
       void maybeScanFocus();
     } catch (error) {
@@ -826,6 +978,7 @@
     demoJournal?.unmount();
     state.requestId++;
     state.user = null;
+    state.deviceSubscribed = false; state.serverMonitorEnabled = false; state.serverPauseUntil = 0; state.swRegistration = null; state.monitorError = "";
     state.focusSymbols = []; state.focusAssetTypes = {}; state.focusSignals = {}; state.alerts = []; state.focusInstrumentIds = {};
     state.symbol = ""; state.instrumentId = null; state.call = null; state.put = null; state.charts = {}; state.tradePlan = null; state.vwapGate = null;
     clearChart();
@@ -868,7 +1021,7 @@
       $("#auth-message").textContent = error.message || "เข้าสู่ระบบไม่สำเร็จ";
     } finally { button.disabled = false; }
   });
-  $("#sign-out").addEventListener("click", async () => { if (!demo) await state.db.auth.signOut(); else location.href = location.pathname; });
+  $("#sign-out").addEventListener("click", async () => { if (!demo) { if (state.deviceSubscribed) await disablePush(); await state.db.auth.signOut(); } else location.href = location.pathname; });
   $("#focus-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const input = $("#focus-input");
@@ -902,10 +1055,17 @@
     if (button) void loadSymbol(button.dataset.symbol);
   });
   $("#alert-list").addEventListener("click", (event) => { const button = event.target.closest("[data-alert-symbol]"); if (button) void loadSymbol(button.dataset.alertSymbol); });
-  $("#notify-button").addEventListener("click", async () => {
-    if (!("Notification" in window) || !window.isSecureContext || Notification.permission !== "default") return;
-    try { await Notification.requestPermission(); } catch (_) { /* In-page alerts stay available. */ }
-    renderAlerts();
+  $("#notify-button").addEventListener("click", () => { void enablePush(); });
+  $("#notify-disable").addEventListener("click", () => { void disablePush(); });
+  $("#notify-test").addEventListener("click", async () => {
+    const button = $("#notify-test");
+    button.disabled = true;
+    try {
+      const { data, error } = await state.db.functions.invoke("option-desk-monitor", { body: { action: "test" } });
+      if (error || data?.error) throw new Error(data?.error || error?.message || "ส่งไม่สำเร็จ");
+      state.monitorError = "ส่งทดสอบแล้ว · ดูการแจ้งเตือนบนอุปกรณ์นี้";
+    } catch (error) { state.monitorError = `ทดสอบไม่สำเร็จ: ${error.message}`; }
+    button.disabled = false; renderAlerts();
   });
   $("#symbol-form").addEventListener("submit", (event) => { event.preventDefault(); loadSymbol($("#symbol-input").value); });
   $("#refresh-button").addEventListener("click", () => {
@@ -952,8 +1112,9 @@
     renderLevels();
     if (previousPlanDirection !== state.planDirection || previousPlanStatus !== state.tradePlan?.status) renderChart();
     if (demo || !state.user || !state.symbol || state.busy || document.hidden || !marketOpenNow()) return;
-    if (Date.now() - state.lastInteractionAt > IDLE_PAUSE_MS || Date.now() < state.quotaPauseUntil) return;
+    if (Date.now() < state.quotaPauseUntil) return;
     const now = Date.now();
+    if (now - state.lastMonitorReadAt >= 90_000) void readMonitorState();
     const needOptions = now - state.lastOptionAttemptAt >= OPTION_POLL_MS;
     const frames = [];
     if (now - (state.lastChartAttemptAt.M1 || 0) >= MINUTE_POLL_MS) frames.push("M1");
@@ -965,8 +1126,11 @@
   document.addEventListener("pointerdown", () => { state.lastInteractionAt = Date.now(); }, { passive: true });
   document.addEventListener("keydown", () => { state.lastInteractionAt = Date.now(); });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) { state.lastInteractionAt = Date.now(); void maybeAutoRefresh(); }
+    if (!document.hidden) { state.lastInteractionAt = Date.now(); state.lastMonitorReadAt = 0; void readMonitorState(); void maybeAutoRefresh(); }
     else renderDataStatus();
+  });
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    if (event.data?.type === "OPEN_SYMBOL" && focusList.symbol(event.data.symbol)) void loadSymbol(event.data.symbol);
   });
   window.setInterval(() => { void maybeAutoRefresh(); }, 30_000);
   window.setInterval(() => { void maybeScanFocus(); }, 15_000);

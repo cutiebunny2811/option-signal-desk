@@ -94,6 +94,10 @@ body,.main-panel{background:var(--bg)}.topbar,.watch-panel,.contract-panel{backg
 .notify-button{width:100%;border:1px solid var(--gold);background:#1c190b;color:var(--gold-hi);padding:8px 9px;text-align:left;font-size:.74rem;font-weight:700}
 .notify-button:hover:not(:disabled){background:#2b250e}
 .notify-button:disabled{border-color:var(--line);background:var(--surface-2);color:var(--muted);opacity:1}
+.notify-actions{display:flex;gap:6px;margin-top:6px}
+.notify-actions button{border:1px solid var(--line);background:transparent;color:var(--text);padding:6px 8px;font-size:.67rem;cursor:pointer}
+.notify-actions button:hover:not(:disabled){border-color:var(--teal)}
+.notify-actions button[hidden]{display:none}
 .notify-state{margin:7px 0 10px;color:var(--faint);font-size:.68rem;line-height:1.45}
 .notify-scope{margin:0 0 10px;color:var(--muted);font-size:.68rem;line-height:1.45}
 .alert-list{list-style:none;max-height:240px;overflow:auto;padding:0;margin:0;border-top:1px solid var(--line-soft)}

@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
   <link rel="stylesheet" href="theme.css?v=4">
 </head>
 <body>
@@ -39,12 +39,13 @@
         <form id="focus-form" class="focus-form"><label class="sr-only" for="focus-input">เพิ่ม ticker ที่เฝ้า</label><input id="focus-input" name="symbol" maxlength="10" placeholder="เพิ่ม ticker เช่น IREN" autocomplete="off" spellcheck="false" required><label class="sr-only" for="focus-asset-type">ประเภทสินทรัพย์</label><select id="focus-asset-type" name="asset_type" aria-label="ประเภทสินทรัพย์"><option value="stock">หุ้น</option><option value="etf">ETF</option></select><button type="submit">เพิ่ม</button></form>
         <p class="focus-feedback" id="focus-feedback" role="status" aria-live="polite"></p>
         <div class="watch-list" id="watch-list"></div>
-        <p class="watch-note" id="focus-scan-note">สแกนเฉพาะรายการนี้เมื่อเปิดหน้าและตลาดเปิด · สัญญาณเฝ้าดูไม่ใช่จุดซื้อ</p>
+        <p class="watch-note" id="focus-scan-note">สแกนเฉพาะรายการนี้ช่วงตลาดเปิด · สัญญาณเฝ้าดูไม่ใช่จุดซื้อ</p>
         <section class="focus-alerts" aria-labelledby="focus-alert-title">
           <div class="focus-alert-heading"><span class="index">ALERTS</span><h3 id="focus-alert-title">แจ้งเตือน</h3></div>
-          <button id="notify-button" class="notify-button" type="button">เปิดแจ้งเตือนเบราว์เซอร์</button>
-          <p id="notify-state" class="notify-state">แจ้งในหน้านี้ได้ทันที · แจ้งเตือนเบราว์เซอร์ต้องกดอนุญาต</p>
-          <p class="notify-scope">หุ้นอื่นแจ้งเมื่อ 1m+5m เพิ่งตรงกัน · จุดเข้า/SL แจ้งเฉพาะหุ้นที่เปิดดูและมีแผนล็อก</p>
+          <button id="notify-button" class="notify-button" type="button">เปิดแจ้งเตือนเครื่องนี้</button>
+          <div class="notify-actions"><button id="notify-test" type="button" hidden>ทดสอบส่งแจ้งเตือน</button><button id="notify-disable" type="button" hidden>ปิดเครื่องนี้</button></div>
+          <p id="notify-state" class="notify-state">กดเปิด Push เพื่อรับแจ้งเตือนแม้ปิดหน้าเว็บ</p>
+          <p class="notify-scope">เซิร์ฟเวอร์แจ้งเมื่อทิศทางหุ้นเฝ้าเปลี่ยนหลังแท่งปิด · แผน Entry/SL ของหุ้นที่เปิดดูแจ้งเฉพาะขณะหน้าเว็บทำงาน</p>
           <ol id="alert-list" class="alert-list"></ol>
         </section>
       </aside>
@@ -160,7 +161,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="config.js"></script>
+  <script src="config.js?v=2"></script>
   <script src="price-levels.js?v=2"></script>
   <script src="trade-plan.js?v=3"></script>
   <script src="chart-time.js?v=1"></script>
@@ -170,6 +171,6 @@
   <script src="api-error.js?v=3"></script>
   <script src="demo-image-import.js?v=1"></script>
   <script src="demo-journal.js?v=3"></script>
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>
