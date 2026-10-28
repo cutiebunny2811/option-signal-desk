@@ -108,3 +108,17 @@ go ไต ค๊ ธิ ผ บ ร ร 28
   assert.equal(trade.opened_at, "2026-10-28T22:31:10");
   assert.equal(trade.closed_at, "2026-10-28T23:44:14");
 });
+
+test("English header OCR rescues an iPhone image whose Thai OCR loses the contract line", () => {
+  const buy = images.parseFilledImageText({
+    text: `23:44\ngo ไต ค๊ ธิ ผ บ ร ร 28\n= 300c126 (W) CaII I00\nค ํ า ส ั ่ ง ซื ้ อ\nา น ว น ท ั ้ ง ห ม ด 100\n) า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 100\nร า ค า เฉ ล ี ่ ย ป ร ร 0.9000\nค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 10/28/2026 11:31:10 EDT`,
+    headerText: `23:44\nREN US$28\n30 Oct 26 (W) Call 100`
+  }, "buy");
+  const sell = images.parseFilledImageText(`IREN US$28\n30 Oct 26 (W) Call 100\nคำสั่ง ขาย\nจำนวนทั้งหมด 100\nจำนวนที่จับคู่แล้ว 100\nราคาเฉลี่ย US$0.6600\nคำสั่งถูกจับคู่สำเร็จ 10/28/2026 12:44:14 EDT`, "sell");
+  const trade = images.buildClosedTrade(buy, sell);
+  assert.equal(trade.contract_label, "IREN 28 CALL · 2026-10-30");
+  assert.equal(trade.buy_total, 9000);
+  assert.equal(trade.sell_total, 6600);
+  assert.throws(() => images.buildClosedTrade(buy, { ...sell, expiry: "2026-11-06" }), /สัญญาเดียวกัน/);
+  assert.throws(() => images.buildClosedTrade(buy, { ...sell, symbol: "USO" }), /Ticker/);
+});

@@ -36,11 +36,48 @@
       for (let index = 0; index < files.length; index++) {
         progress(`กำลังอ่านรูป ${index + 1}/${files.length}…`);
         const { data } = await worker.recognize(files[index]);
-        texts.push(data.text || "");
+        texts.push({ text: data.text || "", headerText: "" });
+      }
+      // Thai OCR is useful for the fill labels, but can mangle the small English
+      // contract line on iPhone screenshots. Read only that header again in English.
+      if (texts.some(({ text }) => !optionPattern.test(text))) {
+        await worker.reinitialize("eng");
+        for (let index = 0; index < files.length; index++) {
+          if (optionPattern.test(texts[index].text)) continue;
+          progress(`กำลังตรวจชื่อสัญญารูป ${index + 1}/${files.length}…`);
+          const header = await cropHeader(files[index]);
+          try {
+            const { data } = await worker.recognize(header.canvas);
+            texts[index].headerText = data.text || "";
+          } finally {
+            URL.revokeObjectURL(header.url);
+          }
+        }
       }
       return texts;
     } finally {
       await worker.terminate();
+    }
+  }
+
+  async function cropHeader(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      const loaded = img.decode ? null : new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+      img.src = url;
+      if (img.decode) await img.decode();
+      else await loaded;
+      const canvas = document.createElement("canvas");
+      const headerHeight = Math.min(img.naturalHeight, Math.max(img.naturalWidth * 0.55, img.naturalHeight * 0.26));
+      const scale = Math.min(2, 1600 / img.naturalWidth);
+      canvas.width = Math.ceil(img.naturalWidth * scale);
+      canvas.height = Math.ceil(headerHeight * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, img.naturalWidth, headerHeight, 0, 0, canvas.width, canvas.height);
+      return { canvas, url };
+    } catch (cause) {
+      URL.revokeObjectURL(url);
+      throw cause;
     }
   }
 
@@ -59,21 +96,41 @@
 
   function parseFilledImageText(rawText, expectedAction) {
     if (!["buy", "sell"].includes(expectedAction)) error("ต้องระบุว่ารูปนี้เป็นซื้อหรือขาย");
-    const text = String(rawText || "").normalize("NFKC");
+    const text = String(typeof rawText === "string" ? rawText : rawText?.text || "").normalize("NFKC");
+    const headerText = String(typeof rawText === "string" ? "" : rawText?.headerText || "").normalize("NFKC");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const optionIndex = lines.findIndex((line) => optionPattern.test(line));
-    if (optionIndex < 0) error("ตัวอ่านภาพจับวันหมดอายุหรือฝั่ง CALL/PUT ไม่ได้");
-    const option = lines[optionIndex].match(optionPattern);
+    const fallbackLines = headerText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const fallbackIndex = fallbackLines.findIndex((line) => optionPattern.test(line));
+    if (optionIndex < 0 && fallbackIndex < 0) error("ตัวอ่านภาพจับวันหมดอายุหรือฝั่ง CALL/PUT ไม่ได้");
+    const option = optionIndex >= 0 ? lines[optionIndex].match(optionPattern) : fallbackLines[fallbackIndex].match(optionPattern);
     if (!option) error("อ่านชื่อสัญญาไม่ครบ · ตรวจรูปที่แนบ");
     const [, day, month, year, side, multiplier] = option;
     const monthNumber = months[month.toLowerCase() === "0ct" ? "oct" : month.toLowerCase()];
     const expiry = `${Number(year) < 100 ? 2000 + Number(year) : Number(year)}-${String(monthNumber).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
-    const header = lines.slice(0, optionIndex);
+    const anchorIndex = optionIndex >= 0 ? optionIndex : lines.findIndex((line) => /\b(?:call|put)\b/i.test(line));
+    const quantityIndex = lines.findIndex((line) => compactThai(line).includes("ทั้งหมด"));
+    const bodyStart = anchorIndex >= 0 ? anchorIndex + 1 : quantityIndex >= 0 ? quantityIndex : -1;
+    if (bodyStart < 0) error("อ่านตำแหน่งข้อมูลราคาและจำนวนในรูปไม่ได้");
+    const header = lines.slice(0, anchorIndex >= 0 ? anchorIndex : bodyStart);
     const tickerCandidates = (header.at(-1) || "").match(/\b[A-Z][A-Z0-9.-]{0,9}\b/g) || [];
-    const symbol = tickerCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
+    let symbol = tickerCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
     const strikeMatch = header.at(-1)?.match(/\b(\d+(?:\.\d+)?)\s*$/);
-    const strike = strikeMatch ? Number(strikeMatch[1]) : null;
-    const afterOption = lines.slice(optionIndex + 1);
+    let strike = strikeMatch ? Number(strikeMatch[1]) : null;
+    let symbolSource = symbol ? "primary" : null;
+    if (fallbackIndex >= 0) {
+      const fallbackHeader = fallbackLines.slice(0, fallbackIndex);
+      const fallbackCandidates = (fallbackHeader.at(-1) || "").match(/\b[A-Z][A-Z0-9.-]{1,9}\b/g) || [];
+      if (!symbol) {
+        symbol = fallbackCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
+        if (symbol) symbolSource = "fallback";
+      }
+      if (strike === null) {
+        const fallbackStrike = fallbackHeader.at(-1)?.match(/\b(\d+(?:\.\d+)?)\s*$/);
+        strike = fallbackStrike ? Number(fallbackStrike[1]) : null;
+      }
+    }
+    const afterOption = lines.slice(bodyStart);
     const firstPriceIndex = afterOption.findIndex((line) => filledPricePattern.test(line));
     if (firstPriceIndex < 0) error("อ่านราคาเฉลี่ยที่จับคู่จริงไม่ได้ · อย่าใช้ราคาลิมิตหรือ Mid Price แทน");
     const price = Number(afterOption[firstPriceIndex].match(filledPricePattern)[1]);
@@ -88,21 +145,26 @@
     const offsetHours = fill[7].toUpperCase() === "EDT" ? 4 : 5;
     const filledAt = new Date(Date.UTC(Number(fill[3]), Number(fill[1]) - 1, Number(fill[2]), Number(fill[4]) + offsetHours, Number(fill[5]), Number(fill[6])));
     if (!Number.isFinite(filledAt.getTime())) error("เวลา Filled ไม่ถูกต้อง");
-    const actionText = compactThai(lines.slice(optionIndex + 1, optionIndex + 4).join(""));
+    const actionText = compactThai(lines.slice(Math.max(0, bodyStart - 2), bodyStart + 3).join(""));
     if (expectedAction === "buy" && actionText.includes("ขาย")) error("รูปช่องซื้อดูเหมือนคำสั่งขาย · สลับรูปให้ถูกช่อง");
     if (expectedAction === "sell" && actionText.includes("ซื้อ")) error("รูปช่องขายดูเหมือนคำสั่งซื้อ · สลับรูปให้ถูกช่อง");
-    return { symbol, strike, expiry, optionSide: side.toLowerCase(), multiplier: Number(multiplier), contracts: filled, price, filledAt: filledAt.toISOString(), bangkokTime: thaiDateTime(filledAt), action: expectedAction };
+    return { symbol, symbolSource, strike, expiry, optionSide: side.toLowerCase(), multiplier: Number(multiplier), contracts: filled, price, filledAt: filledAt.toISOString(), bangkokTime: thaiDateTime(filledAt), action: expectedAction };
   }
 
   function buildClosedTrade(buy, sell) {
     if (!buy || !sell || buy.action !== "buy" || sell.action !== "sell") error("ต้องมีรูปซื้อและรูปขายที่จับคู่แล้ว");
     if (buy.expiry !== sell.expiry || buy.optionSide !== sell.optionSide || buy.multiplier !== sell.multiplier) error("รูปซื้อ–ขายไม่ใช่สัญญาเดียวกัน");
-    if (buy.symbol && sell.symbol && buy.symbol !== sell.symbol) error("Ticker ในรูปซื้อ–ขายไม่ตรงกัน");
+    if (buy.symbol && sell.symbol && buy.symbol !== sell.symbol) {
+      const uncertain = buy.symbolSource === "fallback" ? buy : sell.symbolSource === "fallback" ? sell : null;
+      const certain = uncertain === buy ? sell : buy;
+      if (!uncertain || certain.symbolSource !== "primary" || !certain.symbol.endsWith(uncertain.symbol) || certain.symbol.length - uncertain.symbol.length !== 1) error("Ticker ในรูปซื้อ–ขายไม่ตรงกัน");
+    }
     if (buy.strike !== null && sell.strike !== null && buy.strike !== sell.strike) error("Strike ในรูปซื้อ–ขายไม่ตรงกัน");
     if (buy.contracts !== sell.contracts) error("จำนวนซื้อ–ขายไม่เท่ากัน · รองรับเฉพาะรายการที่ปิดครบแล้ว");
     if (buy.multiplier !== 100) error("ยังรองรับเฉพาะสัญญา Option ที่ตัวคูณ 100");
     if (Date.parse(sell.filledAt) < Date.parse(buy.filledAt)) error("เวลาขายก่อนเวลาซื้อ · ตรวจรูปที่แนบ");
-    const symbol = buy.symbol || sell.symbol, strike = buy.strike ?? sell.strike;
+    const symbol = buy.symbolSource === "primary" ? buy.symbol : sell.symbolSource === "primary" ? sell.symbol : buy.symbol || sell.symbol;
+    const strike = buy.strike ?? sell.strike;
     if (!symbol || !Number.isFinite(strike)) error("อ่าน Ticker หรือ Strike ไม่ได้ครบ · ลองรูปที่ชัดขึ้น หรือจดเอง");
     return {
       contract_label: `${symbol} ${strike} ${buy.optionSide.toUpperCase()} · ${buy.expiry}`,
