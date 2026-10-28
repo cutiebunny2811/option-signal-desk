@@ -44,6 +44,7 @@
 
   const error = (message) => { throw new Error(message); };
   const compactThai = (value) => value.replace(/\s+/g, "");
+  const filledPricePattern = /(?:US\$|\$)?\s*(\d{1,6}\.\d{2,4})\b/i;
   const roundCents = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
   const thaiDateTime = (time) => {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -70,9 +71,9 @@
     const strikeMatch = header.at(-1)?.match(/\b(\d+(?:\.\d+)?)\s*$/);
     const strike = strikeMatch ? Number(strikeMatch[1]) : null;
     const afterOption = lines.slice(optionIndex + 1);
-    const firstPriceIndex = afterOption.findIndex((line) => /(?:US\$|\$)?\s*\d{1,6}\.\d{2}\b/i.test(line));
+    const firstPriceIndex = afterOption.findIndex((line) => filledPricePattern.test(line));
     if (firstPriceIndex < 0) error("อ่านราคาเฉลี่ยที่จับคู่จริงไม่ได้ · อย่าใช้ราคาลิมิตหรือ Mid Price แทน");
-    const price = Number(afterOption[firstPriceIndex].match(/(\d{1,6}\.\d{2})\b/)[1]);
+    const price = Number(afterOption[firstPriceIndex].match(filledPricePattern)[1]);
     const quantityLines = afterOption.slice(0, firstPriceIndex);
     const quantities = quantityLines.flatMap((line) => [...line.matchAll(/(?:^|\s)(\d{1,5})(?=\s|$)/g)].map((match) => Number(match[1])));
     if (quantities.length < 2) error("อ่านจำนวนทั้งหมด/จำนวนที่จับคู่แล้วไม่ครบ · ตรวจรูปที่แนบ");

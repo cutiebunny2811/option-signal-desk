@@ -45,3 +45,36 @@ test("pairing rejects different strikes and unequal contract quantities", () => 
   assert.throws(() => images.buildClosedTrade(buy, { ...sell, contracts: 1 }), /จำนวนซื้อ/);
   assert.throws(() => images.buildClosedTrade(buy, { ...sell, filledAt: "2026-10-21T10:00:00Z" }), /เวลาขาย/);
 });
+
+test("Webull screenshots with four-decimal average price use the Filled price and time", () => {
+  const buy = images.parseFilledImageText(`
+USO US$168
+28 Oct 26 (W) Call 100
+ค ํ า ส ั ่ ง ซื ้ อ
+จ ํ า น ว น ท ั ้ ง ห ม ด 100
+จ ํ า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 100
+ร า ค า เฉ ล ี ่ ย ป ร ร 0.9300
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 10/28/2026 11:32:57 EDT
+ร า ค า ล ิ ม ิ ต บ 5 ร ร 0.9300
+ว ั น แล ะ เว ล า ท ี ่ ส ่ ง ค ํ า ส ั ่ ง 10/28/2026 11:32:57 EDT
+ร า ค า ต ร ง ก ล า ง (Mid Price) 1.51 +403.33%
+`, "buy");
+  const sell = images.parseFilledImageText(`
+USO US$168
+28 Oct 26 (W) Call 100
+ค ํ า ส ั ่ ง ขา ย
+จ ํ า น ว น ท ั ้ ง ห ม ด 100
+จ ํ า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 100
+เว บ ร ร 1.39
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 10/28/2026 11:51:40 EDT
+ร า ค า ล ิ ม ิ ต ป ร ร 1.30
+ว ั น แล ะ เว ล า ท ี ่ ส ่ ง ค ํ า ส ั ่ ง 10/28/2026 11:51:40 EDT
+ร า ค า ต ร ง ก ล า ง (Mid Price) 1.49 +396.67%
+`, "sell");
+  const trade = images.buildClosedTrade(buy, sell);
+  assert.equal(trade.contract_label, "USO 168 CALL · 2026-10-28");
+  assert.equal(trade.buy_total, 9300);
+  assert.equal(trade.sell_total, 13900);
+  assert.equal(trade.opened_at, "2026-10-28T22:32:57");
+  assert.equal(trade.closed_at, "2026-10-28T22:51:40");
+});
