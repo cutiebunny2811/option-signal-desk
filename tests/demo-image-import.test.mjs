@@ -28,7 +28,8 @@ test("Filled buy/sell screenshots create one closed trade from average fill, not
   assert.equal(trade.opened_at, "2026-10-21T22:03:24");
   assert.equal(trade.closed_at, "2026-10-21T23:11:33");
   assert.equal(trade.followed_signal, false);
-  assert.deepEqual(journal.result(journal.validate(trade)), { net: 214, heldMs: 4089000 });
+  assert.equal(journal.result(journal.validate(trade)).net, 214);
+  assert.equal(journal.result(journal.validate(trade)).heldMs, 4089000);
 });
 
 test("import blocks swapped sides, partially filled orders and missing Filled time", () => {

@@ -13,8 +13,19 @@ test("closed Demo trade uses total paid and received, net of entered fees", () =
   const row = journal.validate(trade());
   assert.equal(row.opened_at, "2026-10-21T04:00:00.000Z");
   assert.equal(row.closed_at, "2026-10-21T05:06:00.000Z");
-  assert.deepEqual(journal.result(row), { net: 42.51, heldMs: 66 * 60_000 });
+  assert.equal(journal.result(row).net, 42.51);
+  assert.equal(journal.result(row).heldMs, 66 * 60_000);
+  assert.equal(journal.percent(journal.result(row).returnPercent), "+40.2%");
   assert.equal(journal.duration(66 * 60_000), "1 ชม. 6 น.");
+});
+
+test("return percentage uses net after fees divided by total paid", () => {
+  const winning = journal.result(trade({ buy_total: 9300, sell_total: 13900, fees_total: 0 }));
+  const losing = journal.result(trade({ buy_total: 100, sell_total: 80, fees_total: 2 }));
+  const zeroCost = journal.result(trade({ buy_total: 0, sell_total: 10, fees_total: 0 }));
+  assert.equal(journal.percent(winning.returnPercent), "+49.5%");
+  assert.equal(journal.percent(losing.returnPercent), "−22.0%");
+  assert.equal(journal.percent(zeroCost.returnPercent), "—");
 });
 
 test("followed filter and win rate exclude manual and breakeven trades", () => {

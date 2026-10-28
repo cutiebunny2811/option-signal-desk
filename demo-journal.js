@@ -29,9 +29,16 @@
   }
 
   function result(row) {
-    const net = Math.round((Number(row.sell_total) - Number(row.buy_total) - Number(row.fees_total || 0)) * 100) / 100;
+    const buyTotal = Number(row.buy_total);
+    const net = Math.round((Number(row.sell_total) - buyTotal - Number(row.fees_total || 0)) * 100) / 100;
     const heldMs = Date.parse(row.closed_at) - Date.parse(row.opened_at);
-    return { net, heldMs };
+    return { net, heldMs, returnPercent: buyTotal > 0 ? net / buyTotal * 100 : null };
+  }
+
+  function percent(value) {
+    if (!Number.isFinite(value)) return "—";
+    const rounded = Math.round(value * 10) / 10;
+    return `${rounded > 0 ? "+" : rounded < 0 ? "−" : ""}${Math.abs(rounded).toFixed(1)}%`;
   }
 
   function summarize(rows, followedOnly = true) {
@@ -117,9 +124,9 @@
       const listing = pageRows(state.rows, { followedOnly, query: state.query, page: state.page });
       state.page = listing.page;
       find("#demo-list").innerHTML = listing.rows.length ? listing.rows.map((row) => {
-        const { net, heldMs } = result(row);
+        const { net, heldMs, returnPercent } = result(row);
         const expanded = state.expanded.has(row.id);
-        return `<article class="demo-row${expanded ? " is-expanded" : ""}"><button type="button" class="demo-mobile-summary" data-demo-expand="${html(row.id)}" aria-expanded="${expanded}" aria-controls="demo-more-${html(row.id)}"><span class="demo-mobile-contract"><strong>${html(row.contract_label)}</strong><small>${dateTime(row.closed_at)} · ${row.contracts} สัญญา</small></span><span class="demo-mobile-result"><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong><small>รายละเอียด ${expanded ? "−" : "+"}</small></span></button><div class="demo-row-more" id="demo-more-${html(row.id)}"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>${dollars(row.buy_total)} <span>→</span> ${dollars(row.sell_total)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></div></article>`;
+        return `<article class="demo-row${expanded ? " is-expanded" : ""}"><button type="button" class="demo-mobile-summary" data-demo-expand="${html(row.id)}" aria-expanded="${expanded}" aria-controls="demo-more-${html(row.id)}"><span class="demo-mobile-contract"><strong>${html(row.contract_label)}</strong><small>${dateTime(row.closed_at)} · ${row.contracts} สัญญา</small></span><span class="demo-mobile-result"><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong><small><span class="${net >= 0 ? "positive" : "negative"}">${percent(returnPercent)}</span> · รายละเอียด ${expanded ? "−" : "+"}</small></span></button><div class="demo-row-more" id="demo-more-${html(row.id)}"><div class="demo-contract"><strong>${html(row.contract_label)}</strong><small>${html(row.underlying_symbol)} · <span class="${row.option_side}">${row.option_side.toUpperCase()}</span> · ${row.contracts} สัญญา${row.followed_signal ? " · ตามแอป" : ""}</small></div><div class="demo-amount"><small>ซื้อ / ขายรวม</small><strong>${dollars(row.buy_total)} <span>→</span> ${dollars(row.sell_total)}</strong></div><div class="demo-outcome"><small>สุทธิหลังค่าธรรมเนียม</small><strong class="${net >= 0 ? "positive" : "negative"}">${money(net)}</strong><small class="demo-return"><span class="${net >= 0 ? "positive" : "negative"}">ผลตอบแทน ${percent(returnPercent)}</span></small></div><div class="demo-hold"><small>เวลาถือ</small><strong>${duration(heldMs)}</strong><small>${dateTime(row.closed_at)}</small></div><div class="demo-row-actions"><button type="button" data-demo-edit="${html(row.id)}">แก้ไข</button><button type="button" data-demo-void="${html(row.id)}">ยกเลิก</button></div></div></article>`;
       }).join("") : `<p class="demo-empty">${state.query ? "ไม่พบรายการที่ตรงกับคำค้น · ลอง ticker หรือ strike อื่น" : "ยังไม่มีรายการที่ปิดแล้วในมุมมองนี้ · กด “จด Demo trade” เพื่อเริ่มเก็บผลจริงจากพอร์ตทดลอง"}</p>`;
       find("#demo-list-count").textContent = listing.total ? `${listing.start + 1}–${listing.start + listing.rows.length} จาก ${listing.total} รายการ` : "0 รายการ";
       find("#demo-pagination").hidden = listing.pages <= 1;
@@ -353,5 +360,5 @@
   }
 
   function unmount() { current = null; }
-  return { duration, result, summarize, pageRows, validate, csv, mount, unmount };
+  return { duration, result, percent, summarize, pageRows, validate, csv, mount, unmount };
 });
