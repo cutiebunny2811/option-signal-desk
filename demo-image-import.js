@@ -7,6 +7,8 @@
   "use strict";
 
   const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  // OCR commonly reads "30 Oct 26" as "300ct26" and drops the opening parenthesis of (W).
+  const optionPattern = /\b(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|0ct|Nov|Dec)\s*(\d{2,4})\b(?:\s*\(?W\)?)?\s+(Call|Put)\s+(\d+)\b/i;
   const fixedScript = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
   let scriptPromise;
 
@@ -59,12 +61,13 @@
     if (!["buy", "sell"].includes(expectedAction)) error("ต้องระบุว่ารูปนี้เป็นซื้อหรือขาย");
     const text = String(rawText || "").normalize("NFKC");
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const optionIndex = lines.findIndex((line) => /\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2,4}\b/i.test(line) && /\b(?:Call|Put)\b/i.test(line));
-    if (optionIndex < 0) error("อ่านวันหมดอายุหรือฝั่ง CALL/PUT ไม่ได้ · ใช้รูปหน้ารายละเอียด Filled ที่เห็นชื่อสัญญาชัดเจน");
-    const option = lines[optionIndex].match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{2,4})(?:\s*\(W\))?\s+(Call|Put)\s+(\d+)\b/i);
+    const optionIndex = lines.findIndex((line) => optionPattern.test(line));
+    if (optionIndex < 0) error("ตัวอ่านภาพจับวันหมดอายุหรือฝั่ง CALL/PUT ไม่ได้");
+    const option = lines[optionIndex].match(optionPattern);
     if (!option) error("อ่านชื่อสัญญาไม่ครบ · ตรวจรูปที่แนบ");
     const [, day, month, year, side, multiplier] = option;
-    const expiry = `${Number(year) < 100 ? 2000 + Number(year) : Number(year)}-${String(months[month.toLowerCase()]).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
+    const monthNumber = months[month.toLowerCase() === "0ct" ? "oct" : month.toLowerCase()];
+    const expiry = `${Number(year) < 100 ? 2000 + Number(year) : Number(year)}-${String(monthNumber).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
     const header = lines.slice(0, optionIndex);
     const tickerCandidates = (header.at(-1) || "").match(/\b[A-Z][A-Z0-9.-]{0,9}\b/g) || [];
     const symbol = tickerCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;

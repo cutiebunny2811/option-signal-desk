@@ -246,7 +246,7 @@
         setImportStatus("อ่านครบแล้ว · เติมฟอร์มให้ตรวจและกดบันทึก 1 ครั้ง ยังไม่ได้เก็บลงสถิติ");
         form.scrollIntoView({ behavior: "smooth", block: "nearest" });
       } catch (error) {
-        if (current === state) setImportStatus(`อ่านรูปไม่สำเร็จ: ${error.message} · ลองรูปที่ชัดขึ้น หรือจดเอง`, true);
+        if (current === state) setImportStatus(`อ่านรูปไม่สำเร็จ: ${error.message} · ระบบอาจอ่านอักษรผิด ลองแนบใหม่หรือจดเอง`, true);
       } finally {
         scanBusy = false;
         if (scanQueued) { scanQueued = false; if (imageFiles.buy && imageFiles.sell) void scanImages(); }

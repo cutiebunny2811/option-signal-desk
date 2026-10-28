@@ -79,3 +79,32 @@ USO US$168
   assert.equal(trade.opened_at, "2026-10-28T22:32:57");
   assert.equal(trade.closed_at, "2026-10-28T22:51:40");
 });
+
+test("OCR date 300ct26 and ticker visible only on sell screenshot still pair correctly", () => {
+  const buy = images.parseFilledImageText(`
+go ไต ค๊ ธิ ผ บ ร ร 28
+= 300ct 26 (W) Call 100
+ค ํ า ส ั ่ ง ซื ้ อ
+า น ว น ท ั ้ ง ห ม ด 100
+) า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 100
+ร า ค า เฉ ล ี ่ ย ป ร ร 0.9000
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 10/28/2026 11:31:10 EDT
+ร า ค า ล ิ ม ิ ต บ 5 ร ร 0.9200
+`, "buy");
+  const sell = images.parseFilledImageText(`
+๕ IREN บ ร ร 28
+5 300ct26 W) call 100
+ค ํ า ส ั ่ ง ขา ย
+า น ว น ท ั ้ ง ห ม ด 100
+) า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 100
+ร า ค า เฉ ล ี ่ ย ป ร ร 0.6600
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 10/28/2026 12:44:14 EDT
+ร า ค า ล ิ ม ิ ต US$0.6600
+`, "sell");
+  const trade = images.buildClosedTrade(buy, sell);
+  assert.equal(trade.contract_label, "IREN 28 CALL · 2026-10-30");
+  assert.equal(trade.buy_total, 9000);
+  assert.equal(trade.sell_total, 6600);
+  assert.equal(trade.opened_at, "2026-10-28T22:31:10");
+  assert.equal(trade.closed_at, "2026-10-28T23:44:14");
+});
