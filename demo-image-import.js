@@ -9,6 +9,7 @@
   const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
   // OCR commonly reads "30 Oct 26" as "300ct26" and drops the opening parenthesis of (W).
   const optionPattern = /\b(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|0ct|Nov|Dec)\s*(\d{2,4})\b(?:\s*\(?W\)?)?\s+(Call|Put)\s+(\d+)\b/i;
+  const quotedContractPattern = /\b([A-Z][A-Z0-9.-]{0,9})\s*(?:US\s*)?\$\s*(\d+(?:\.\d+)?)\b/;
   const fixedScript = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
   let scriptPromise;
 
@@ -40,10 +41,10 @@
       }
       // Thai OCR is useful for the fill labels, but can mangle the small English
       // contract line on iPhone screenshots. Read only that header again in English.
-      if (texts.some(({ text }) => !optionPattern.test(text))) {
+      if (texts.some(({ text }) => needsHeaderRetry(text))) {
         await worker.reinitialize("eng");
         for (let index = 0; index < files.length; index++) {
-          if (optionPattern.test(texts[index].text)) continue;
+          if (!needsHeaderRetry(texts[index].text)) continue;
           progress(`กำลังตรวจชื่อสัญญารูป ${index + 1}/${files.length}…`);
           const header = await cropHeader(files[index]);
           try {
@@ -83,6 +84,23 @@
 
   const error = (message) => { throw new Error(message); };
   const compactThai = (value) => value.replace(/\s+/g, "");
+  const textLines = (text) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  function contractFromHeader(lines) {
+    const quoted = lines.map((line) => line.match(quotedContractPattern)).findLast(Boolean);
+    if (quoted) return { symbol: quoted[1], strike: Number(quoted[2]) };
+    const lastLine = lines.at(-1) || "";
+    const candidates = lastLine.match(/\b[A-Z][A-Z0-9.-]{0,9}\b/g) || [];
+    const symbol = candidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
+    const strikeMatch = lastLine.match(/\b(\d+(?:\.\d+)?)\s*$/);
+    return { symbol, strike: strikeMatch ? Number(strikeMatch[1]) : null };
+  }
+  function needsHeaderRetry(text) {
+    const lines = textLines(String(text || "").normalize("NFKC"));
+    const optionIndex = lines.findIndex((line) => optionPattern.test(line));
+    if (optionIndex < 0) return true;
+    const contract = contractFromHeader(lines.slice(0, optionIndex));
+    return !contract.symbol || contract.strike === null;
+  }
   const filledPricePattern = /(?:US\$|\$)?\s*(\d{1,6}\.\d{2,4})\b/i;
   const roundCents = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
   const thaiDateTime = (time) => {
@@ -98,9 +116,9 @@
     if (!["buy", "sell"].includes(expectedAction)) error("ต้องระบุว่ารูปนี้เป็นซื้อหรือขาย");
     const text = String(typeof rawText === "string" ? rawText : rawText?.text || "").normalize("NFKC");
     const headerText = String(typeof rawText === "string" ? "" : rawText?.headerText || "").normalize("NFKC");
-    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = textLines(text);
     const optionIndex = lines.findIndex((line) => optionPattern.test(line));
-    const fallbackLines = headerText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const fallbackLines = textLines(headerText);
     const fallbackIndex = fallbackLines.findIndex((line) => optionPattern.test(line));
     if (optionIndex < 0 && fallbackIndex < 0) error("ตัวอ่านภาพจับวันหมดอายุหรือฝั่ง CALL/PUT ไม่ได้");
     const option = optionIndex >= 0 ? lines[optionIndex].match(optionPattern) : fallbackLines[fallbackIndex].match(optionPattern);
@@ -113,22 +131,15 @@
     const bodyStart = anchorIndex >= 0 ? anchorIndex + 1 : quantityIndex >= 0 ? quantityIndex : -1;
     if (bodyStart < 0) error("อ่านตำแหน่งข้อมูลราคาและจำนวนในรูปไม่ได้");
     const header = lines.slice(0, anchorIndex >= 0 ? anchorIndex : bodyStart);
-    const tickerCandidates = (header.at(-1) || "").match(/\b[A-Z][A-Z0-9.-]{0,9}\b/g) || [];
-    let symbol = tickerCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
-    const strikeMatch = header.at(-1)?.match(/\b(\d+(?:\.\d+)?)\s*$/);
-    let strike = strikeMatch ? Number(strikeMatch[1]) : null;
+    let { symbol, strike } = contractFromHeader(header);
     let symbolSource = symbol ? "primary" : null;
     if (fallbackIndex >= 0) {
-      const fallbackHeader = fallbackLines.slice(0, fallbackIndex);
-      const fallbackCandidates = (fallbackHeader.at(-1) || "").match(/\b[A-Z][A-Z0-9.-]{1,9}\b/g) || [];
+      const fallback = contractFromHeader(fallbackLines.slice(0, fallbackIndex));
       if (!symbol) {
-        symbol = fallbackCandidates.filter((item) => !["PM", "AM", "US", "USD", "EDT", "EST"].includes(item)).at(-1) || null;
+        symbol = fallback.symbol;
         if (symbol) symbolSource = "fallback";
       }
-      if (strike === null) {
-        const fallbackStrike = fallbackHeader.at(-1)?.match(/\b(\d+(?:\.\d+)?)\s*$/);
-        strike = fallbackStrike ? Number(fallbackStrike[1]) : null;
-      }
+      if (strike === null) strike = fallback.strike;
     }
     const afterOption = lines.slice(bodyStart);
     const firstPriceIndex = afterOption.findIndex((line) => filledPricePattern.test(line));

@@ -122,3 +122,44 @@ test("English header OCR rescues an iPhone image whose Thai OCR loses the contra
   assert.throws(() => images.buildClosedTrade(buy, { ...sell, expiry: "2026-11-06" }), /สัญญาเดียวกัน/);
   assert.throws(() => images.buildClosedTrade(buy, { ...sell, symbol: "USO" }), /Ticker/);
 });
+
+test("NVDA Filled screenshots keep ticker and strike when OCR adds junk after the quote", () => {
+  const buy = images.parseFilledImageText(`
+22:50 cd 3
+< ฒ ค ห
+a NVDA US$210 LE (
+02 Nov 26 (W) Call 100 <7
+ค ํ า ส ั ่ ง ซื ้ อ
+จ ํ า น ว น ท ั ้ ง ห ม ด 200
+จ ํ า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 200
+ร า ค า เฉ ล ี ่ ย ป ร ร 0.8500
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 11/02/2026 10:25:15 EST
+ร า ค า ล ิ ม ิ ต บ 5 ร ร 0.8700
+`, "buy");
+  const sell = images.parseFilledImageText(`
+22:50 hed 2,
+< ฒ PM
+a NVDA US$210 Sa (
+02 Nov 26 (W) Call 100 < ์ 7
+ค ํ า ส ั ่ ง ขา ย
+จ ํ า น ว น ท ั ้ ง ห ม ด 200
+จ ํ า น ว น ท ี ่ จ ั บ ค ู ่ แล ้ ว 200
+ร า ค า เฉ ล ี ่ ย US$0.1600
+ค ํ า ส ั ่ ง ถู ก จ ั บ ค ู ่ ส ํ า เร ็ อ 11/02/2026 10:50:39 EST
+ร า ค า ล ิ ม ิ ต US$0.1600
+`, "sell");
+  const trade = images.buildClosedTrade(buy, sell);
+  assert.equal(trade.contract_label, "NVDA 210 CALL · 2026-11-02");
+  assert.equal(trade.contracts, 200);
+  assert.equal(trade.buy_total, 17000);
+  assert.equal(trade.sell_total, 3200);
+  assert.equal(trade.opened_at, "2026-11-02T22:25:15");
+  assert.equal(trade.closed_at, "2026-11-02T22:50:39");
+});
+
+test("English header OCR can supply ticker and strike when the main OCR only sees the option line", () => {
+  const text = screenshotText("ซื้อ", "0.85", "11/02/2026 10:25:15 EST", "11/02/2026 10:25:15 EST").replace("ABC US$100", "unreadable header");
+  const buy = images.parseFilledImageText({ text, headerText: "NVDA US$210 LE (\n02 Nov 26 (W) Call 100" }, "buy");
+  assert.equal(buy.symbol, "NVDA");
+  assert.equal(buy.strike, 210);
+});
