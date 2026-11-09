@@ -86,6 +86,12 @@ test("selected option needs a current, valid, reasonably liquid quote", () => {
   assert.equal(tracker.contractCheck(contract({ quote_time: new Date(NOW - 6 * 60_000).toISOString() }), NOW).ok, false);
 });
 
+test("an oversized reference setup never locks a live entry", () => {
+  const result = tracker.reconcile(null, context({ candidate: candidate({ wideRisk: true, extremeRisk: true }) }));
+  assert.equal(result.plan, null);
+  assert.equal(result.option.ok, true);
+});
+
 test("put setup confirms only on a fresh close below the locked level", () => {
   const put = candidate({ direction: "down", entry: 10, stop: 10.2, tp1: 9.8, tp2: 9.64 });
   const first = bar(1000, 10.1, 10.15, 10.04, 10.08);

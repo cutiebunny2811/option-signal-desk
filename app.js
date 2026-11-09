@@ -500,7 +500,7 @@
     const previousPlan = state.tradePlan;
     const result = tradePlan.reconcile(previousPlan, {
       symbol: state.symbol, sessionKey, candidate,
-      confirmed: state.planDirection === direction && direction !== "wait" && !candidate?.wideRisk,
+      confirmed: Boolean(candidate && state.planDirection === direction && direction !== "wait" && !candidate.wideRisk),
       marketOpen, chartFresh,
       contract: selectedTradeContract(direction), bars: minuteBars, vwap, now
     });
@@ -536,7 +536,7 @@
       : state.planDirection !== "wait" ? state.planDirection
       : ["up", "down"].includes(state.signalAssessment?.direction) ? state.signalAssessment.direction : watchDirection;
     const tracked = state.levelSide === "auto" ? state.tradePlan : null;
-    const plan = tracked || (recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction) : null);
+    const plan = tracked || (recentHistory && direction !== "wait" ? priceLevels.calculate(bars, direction, { preview: true }) : null);
     const livePlan = Boolean(tracked && ["armed", "triggered", "tp1"].includes(tracked.status) && fresh);
     return { indicators, plan, fresh, source, livePlan, recentHistory, tracked };
   }
@@ -544,6 +544,8 @@
   function renderPlanWorkflow(tracked) {
     const box = $("#plan-workflow");
     const lastMinute = barsFor("M1").at(-1);
+    const previewCandidate = state.planDirection !== "wait"
+      ? priceLevels.calculate(barsFor("M5"), state.planDirection, { preview: true }) : null;
     const labels = { armed: "เฝ้าทะลุ · ยังไม่เข้า", triggered: "ทะลุยืนยัน · ตรวจ Option", tp1: "ราคาหุ้นแตะ TP1", tp2: "ราคาหุ้นแตะ TP2", stopped: "ราคาหุ้นแตะ SL", cancelled: "ยกเลิก setup", missed: "พลาดจุดเข้า · ไม่ไล่ราคา", ambiguous: "ลำดับราคาไม่ชัด", data_gap: "ข้อมูลขาดช่วง · หยุดแผน", session_end: "จบรอบตลาด" };
     const active = tracked && ["armed", "triggered", "tp1"].includes(tracked.status);
     const tone = tracked?.direction === "down" ? "down" : "up";
@@ -564,7 +566,8 @@
       ? "หุ้นมีสัญญาณระยะสั้นแล้ว · รอ Option quote สดและเลือกสัญญาก่อนล็อกแผน"
       : "รอแท่ง 1m+5m ปิดแล้วสดและทิศทางตรงกัน · 15m ห้ามสวนทาง · 1h ใช้ดูบริบท";
     else if (state.optionGate && !state.optionGate.ok) detail = `เลือกสัญญา${state.planDirection === "up" ? " CALL" : " PUT"} ที่ผ่านเกณฑ์ · ${state.optionGate.reasons.join(" · ")}`;
-    else if (priceLevels.calculate(barsFor("M5"), state.planDirection)?.wideRisk) detail = "ระยะ Entry ถึง SL กว้างกว่า 3 ATR · ไม่ล็อกแผน รอ setup 5m ที่เสี่ยงแคบลง";
+    else if (previewCandidate?.extremeRisk) detail = `แท่งราคาเคลื่อนไหวแรงจน Entry ถึง SL กว้าง ${previewCandidate.riskAtr} ATR (เกิน 8) · แสดงระดับจำลองด้านล่าง แต่ไม่ล็อกจุดเข้า · รอ setup 5m ที่เสี่ยงแคบลง`;
+    else if (previewCandidate?.wideRisk) detail = "ระยะ Entry ถึง SL กว้างกว่า 3 ATR · แสดงระดับจำลอง แต่ไม่ล็อกแผน รอ setup 5m ที่เสี่ยงแคบลง";
     else if (state.vwapGate?.ready && !state.vwapGate.ok) detail = `VWAP ยังไม่ยืนยันฝั่ง ${state.planDirection === "up" ? "CALL" : "PUT"} · รอแท่ง 1m ใหม่`;
     else detail = state.planBlock || "รอข้อมูลกราฟ 1m / 5m ที่ปิดครบและสด";
     const contractName = (manual ? state.tradePlan : tracked)?.contractSymbol || state.optionGate?.symbol || "ยังไม่พร้อม";
@@ -590,6 +593,7 @@
     const planStatus = { armed: "เฝ้าทะลุ", triggered: "ผ่านจุดเข้า", tp1: "แตะ TP1", tp2: "แตะ TP2", stopped: "แตะ SL", cancelled: "ยกเลิก", missed: "พลาดจุดเข้า", ambiguous: "ลำดับไม่ชัด", data_gap: "ข้อมูลขาดช่วง", session_end: "จบรอบตลาด" };
     status.textContent = tracked ? `แผน ${tracked.direction === "up" ? "CALL" : "PUT"} · ${planStatus[tracked.status] || "รอข้อมูล"} · 1R ${money(tracked.risk)}`
       : state.levelSide !== "auto" && plan ? "ดูระดับจำลอง · ยังไม่ใช่แผนเข้า"
+      : plan?.extremeRisk ? `WAIT · 1R กว้าง ${plan.riskAtr} ATR · ระดับจำลองเท่านั้น`
       : plan?.wideRisk ? `WAIT · 1R กว้างกว่า 3 ATR (${money(plan.risk)})`
       : plan && !marketOpenNow() ? "WAIT · ตลาดปิด · ระดับจากรอบก่อน"
       : plan ? "WAIT · ระดับอ้างอิง 5m ยังไม่ล็อก"
@@ -597,19 +601,20 @@
       : !recentHistory ? "WAIT · ไม่มีแท่งล่าสุดใน 4 วัน"
       : source?.stale || !fresh ? "WAIT · รอแท่ง 5m ใหม่"
       : "WAIT · เลือก CALL/PUT เพื่อดูระดับจำลอง";
+    const previewLabel = plan?.extremeRisk ? " จำลอง" : "";
     const cells = [
       ["Forecast* +15m", fresh ? indicators?.projection : null, "forecast"],
       ["EMA9 · 5m", indicators?.ema9, "ema-fast"],
       ["EMA21 · 5m", indicators?.ema21, "ema-slow"],
-      [`Entry ${plan?.direction === "down" ? "PUT" : plan?.direction === "up" ? "CALL" : ""}`, plan?.entry, "entry"],
-      ["SL · จุดยกเลิก", plan?.stop, "stop"],
-      ["TP1 · 1R", plan?.tp1, "target"],
-      ["TP2 · 1.8R", plan?.tp2, "target"],
+      [`Entry ${plan?.direction === "down" ? "PUT" : plan?.direction === "up" ? "CALL" : ""}${previewLabel}`, plan?.entry, "entry"],
+      [`SL${previewLabel} · จุดยกเลิก`, plan?.stop, "stop"],
+      [`TP1${previewLabel} · 1R`, plan?.tp1, "target"],
+      [`TP2${previewLabel} · 1.8R`, plan?.tp2, "target"],
       ["1R · ระยะเสี่ยง", plan?.risk, "risk"]
     ];
     $("#level-grid").innerHTML = cells.map(([label, value, tone]) => `<div class="level-cell ${tone}"><small>${esc(label)}</small><strong>${money(value)}</strong></div>`).join("");
     $("#level-note").textContent = indicators
-      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ${tracked ? `ระดับล็อกตั้งแต่ ${bkkTime(tracked.createdAt)}` : "ระดับจำลอง ไม่ใช่สัญญาณเข้า"} · ราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
+      ? `อ้างอิงแท่ง 5m ปิดล่าสุด ${bkkTime(new Date((indicators.basedOn + 300) * 1000))} · ${tracked ? `ระดับล็อกตั้งแต่ ${bkkTime(tracked.createdAt)}` : plan?.extremeRisk ? `1R กว้าง ${plan.riskAtr} ATR · ระดับจำลองเท่านั้น ไม่ใช่สัญญาณเข้า` : "ระดับจำลอง ไม่ใช่สัญญาณเข้า"} · ราคาหุ้น ไม่ใช่ option premium · Forecast* เป็นเพียงการลากแนว EMA ต่อ`
       : "รอแท่ง 5m ให้พอคำนวณ · ระดับทั้งหมดอ้างอิงราคาหุ้น ไม่ใช่ราคา premium ของ option";
     renderPlanWorkflow(tracked);
   }
@@ -683,7 +688,7 @@
           projectionLine.setData([{ time: startTime, value: indicators.ema9 }, { time: startTime + 900, value: indicators.projection }]);
         }
       }
-      if (plan) {
+      if (plan && !plan.extremeRisk) {
         addLevel(plan.entry, "ENTRY", livePlan ? "#0b817c" : "#899a9c");
         addLevel(plan.stop, "SL", livePlan ? "#8c1c2b" : "#ac7f82");
         addLevel(plan.tp1, "TP1", livePlan ? "#0b817c" : "#65958f");
